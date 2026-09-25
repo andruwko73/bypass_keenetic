@@ -343,6 +343,9 @@ def _router_health_payload(ctx, query):
 
 
 def dispatch(ctx, path, query=''):
+    if path == '/api/route_move_status':
+        import route_move_runtime
+        return {'kind': 'json', 'payload': route_move_runtime.snapshot(), 'status': 200}
     if path == '/route-diagnostics':
         return {'kind': 'html', 'html': _call(ctx, 'route_diagnostics_page') or ''}
     if path == '/api/route_diagnostics':

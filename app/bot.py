@@ -1575,12 +1575,12 @@ def _set_active_key(proto, key):
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
 
 
-def _install_key_for_protocol(proto, key_value, verify=True):
+def _install_key_for_protocol(proto, key_value, verify=True, *, require_health=True):
     started_at = time.time()
     try:
         live_apply = globals().get('_try_live_key_apply')
         if callable(live_apply):
-            live_result = live_apply(proto, key_value)
+            live_result = live_apply(proto, key_value, require_health=require_health)
             if live_result is not None:
                 return live_result
         installer = PROXY_KEY_INSTALLERS.get(proto)
@@ -1625,12 +1625,8 @@ def _apply_manual_key_safely(
     try:
         if pool_enabled:
             should_resume_probe, pause_note = _pause_pool_probe_for_apply()
-        same_active_key = bool(not verify and _active_key_endpoint_healthy(proto, key))
-        if same_active_key:
-            label = (_proxy_apply_settings().get(proto) or {}).get('label', proto)
-            result = f'✅ {label}: этот ключ уже активен, рабочий локальный прокси сохранён без перезапуска.'
-        else:
-            result = _install_key_for_protocol(proto, key, verify=verify)
+        same_active_key = _post_apply_current_matches(proto, key)
+        result = _install_key_for_protocol(proto, key, verify=False, require_health=False)
         discard_previous = globals().get('_discard_superseded_failover_transactions')
         if callable(discard_previous):
             discard_previous(proto)
@@ -5197,6 +5193,10 @@ def _sync_proxy_route_policy_config(strict=False):
     if not XRAY_STRICT_TRANSPARENT_PROTOCOLS:
         return
     try:
+        backend = globals().get('proxy_live_backend')
+        if backend is not None and backend.confirms_config(_logical_proxy_config()):
+            _write_runtime_log('Route sync: Xray configuration unchanged; restart skipped.')
+            return
         _write_all_proxy_core_config()
         ok, note = _restart_core_proxy_after_validation()
     except Exception as exc:
@@ -8655,18 +8655,37 @@ def _apply_service_profile(profile_id):
 
 def _move_route_list(source_list, target_list):
     from unblock_lists import move_unblock_list
+    from protocol_catalog import PROTOCOL_ROUTE_NAMES
+    import route_move_runtime
+    set_names = {'shadowsocks': 'unblocksh', 'vmess': 'unblockvmess', 'vless': 'unblockvless',
+                 'vless2': 'unblockvless2', 'trojan': 'unblocktroj', 'hysteria2': 'unblockhy2'}
+    affected = ' '.join(set_names[proto] for proto, name in PROTOCOL_ROUTE_NAMES.items()
+                        if name + '.txt' in (source_list, target_list))
+    started = time.monotonic()
+    timings = []
+    attempts = 0
 
     def apply_changes():
+        nonlocal attempts
+        attempts += 1
+        route_move_runtime.phase('Восстановление прежних маршрутов' if attempts > 1 else 'Применение маршрутов')
+        phase = time.monotonic()
         _sync_proxy_route_policy_config(strict=True)
-        subprocess.run(['/opt/bin/unblock_update.sh'], check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        timings.append(('core', round(time.monotonic() - phase, 3)))
+        route_move_runtime.phase('Восстановление DNS и адресов' if attempts > 1 else 'Обновление DNS и адресов')
+        phase = time.monotonic()
+        route_move_runtime.run_update(affected)
+        timings.append(('dns_ipset', round(time.monotonic() - phase, 3)))
 
-    with service_route_mutation_lock:
-        result = move_unblock_list(source_list, target_list, apply_changes=apply_changes)
-        if _web_route_tools_runtime is not None:
-            _web_route_tools_runtime.invalidate_intersections_cache()
-        _invalidate_web_status_cache()
-        return result
+    try:
+        with service_route_mutation_lock:
+            result = move_unblock_list(source_list, target_list, apply_changes=apply_changes)
+            if _web_route_tools_runtime is not None:
+                _web_route_tools_runtime.invalidate_intersections_cache()
+            _invalidate_web_status_cache()
+            return result
+    finally:
+        _write_runtime_log(f'Route move: total_seconds={time.monotonic() - started:.3f} stages={timings}')
 
 
 def _resolve_route_intersections(target_route):
@@ -11281,7 +11300,14 @@ def _remove_file_if_exists(file_path):
     _store_remove_file_if_exists(file_path, logger=_write_runtime_log)
 
 
+_pool_delete_context = threading.local()
+
+
 def _clear_installed_key_for_protocol(proto):
+    if globals().get('proxy_live_backend') is not None:
+        result = _try_live_key_apply(proto, '', require_health=False)
+        if result is not None:
+            return result
     if proto == 'vmess':
         for file_path in _v2ray_key_file_candidates(VMESS_KEY_PATH):
             _remove_file_if_exists(file_path)
@@ -11300,8 +11326,6 @@ def _clear_installed_key_for_protocol(proto):
             _remove_file_if_exists(file_path)
     else:
         raise ValueError('Неизвестный протокол')
-    if _load_proxy_mode() == proto:
-        update_proxy('none')
     _write_all_proxy_core_config()
     _restart_proxy_services_for_protocols([proto])
 
@@ -11345,17 +11369,29 @@ def _delete_pool_key(proto, key_value):
         current_key = (_load_current_keys().get(proto) or '').strip()
         was_current = bool(current_key and current_key == key_value)
         keys = _dedupe_key_list(pools.get(proto, []) or [])
-        promoted_key = keys[0] if was_current and keys else ''
+        promoted_key = ''
+        if was_current:
+            for candidate in keys:
+                try:
+                    _proxy_outbound_from_key(proto, candidate, 'proxy-delete-validation')
+                except (ValueError, TypeError, KeyError):
+                    continue
+                promoted_key = candidate
+                break
         should_clear_current = was_current and not promoted_key
         if not was_current:
             _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
             final_pools = pools
             should_clear_current = False
-    if promoted_key:
-        _install_key_for_protocol(proto, promoted_key, verify=False)
-        _audit_key_switch('pool_delete_promote', proto, promoted_key, 'active key deleted')
-    elif should_clear_current:
-        _clear_installed_key_for_protocol(proto)
+    _pool_delete_context.removed_keys = (key_value,)
+    try:
+        if promoted_key:
+            _install_key_for_protocol(proto, promoted_key, verify=False, require_health=False)
+            _audit_key_switch('pool_delete_promote', proto, promoted_key, 'active key deleted')
+        elif should_clear_current:
+            _clear_installed_key_for_protocol(proto)
+    finally:
+        _pool_delete_context.removed_keys = ()
     if was_current:
         with key_pool_lock:
             latest_pools, _ = _key_pool_store().delete_pool_key(
@@ -11371,6 +11407,8 @@ def _delete_pool_key(proto, key_value):
     if was_current:
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
+        if promoted_key:
+            _schedule_applied_pool_key_probe(proto, promoted_key)
     else:
         _invalidate_pool_data_cache()
 
@@ -11379,11 +11417,15 @@ def _clear_pool(proto):
     current_removed = False
     with key_pool_lock:
         pools, removed_keys = _key_pool_store().clear_pool(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto)
-        _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
         current_key = (_load_current_keys().get(proto) or '').strip()
         if current_key and current_key in removed_keys:
             current_removed = True
-            _clear_installed_key_for_protocol(proto)
+            _pool_delete_context.removed_keys = tuple(removed_keys)
+            try:
+                _clear_installed_key_for_protocol(proto)
+            finally:
+                _pool_delete_context.removed_keys = ()
+        _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
     if removed_keys:
         _forget_unreferenced_key_probes(removed_keys, pools)
     if current_removed:
@@ -15524,6 +15566,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         '/api/router_metrics',
         '/api/telegram_call_learning',
         '/api/route_intersections',
+        '/api/route_move_status',
         '/api/protocol_check_panel',
         '/static/',
     )
@@ -16248,6 +16291,7 @@ def _build_v2ray_config(
         transparent_route_policies=_transparent_route_policies(route_entries),
         cross_route_domain_overrides=_transparent_cross_route_domain_overrides(route_entries),
         bittorrent_direct_enabled=XRAY_BITTORRENT_DIRECT_ENABLED,
+        reserve_protocol_slots=True,
     )
 
 
@@ -16506,7 +16550,29 @@ def _live_key_precheck(proto, key):
     return True
 
 
-def _try_live_key_apply(proto, key):
+def _restart_cold_key_runtime(proto):
+    """Only an explicitly unqualified hot change reaches this local restart."""
+    from proxy_live_services import restart_service
+    ports = {'shadowsocks': localportsh, 'trojan': localporttrojan}
+    if proto in ports and not restart_service(proto, int(ports[proto]), enabled=bool(_load_current_keys().get(proto))):
+        return False
+    result = subprocess.run([CORE_PROXY_SERVICE_SCRIPT, 'restart'], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=35, check=False)
+    if result.returncode:
+        return False
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if proxy_live_backend.identity():
+            try:
+                proxy_live_backend.api.outbounds()
+                return True
+            except Exception:
+                pass
+        time.sleep(.25)
+    return False
+
+
+def _try_live_key_apply(proto, key, *, require_health=True):
     backend = globals().get('proxy_live_backend')
     if backend is None or proto not in backend.allowed_protocols:
         return None
@@ -16517,21 +16583,34 @@ def _try_live_key_apply(proto, key):
             proto, key, current=current, desired=desired, ticket=ticket,
             verify=lambda: _live_key_data_check(proto, key),
             precheck=lambda: _live_key_precheck(proto, key),
+            require_health=require_health,
         )
-    except Exception:
+        if result is None and not require_health:
+            result = backend.apply_cold_manual(proto, key, current=current, desired=desired,
+                ticket=ticket, restart=_restart_cold_key_runtime)
+            globals()['proxy_live_prepared_config'] = desired
+    except Exception as exc:
         # Never convert API/disk uncertainty into a global restart.
-        raise RuntimeError('Смена ключа не подтверждена. Прежний маршрут сохранён, '
-                           'либо требуется восстановление незавершённой операции. '
-                           'Общий Xray не перезапускался.') from None
+        from proxy_live_errors import describe_apply_error
+        code, message = describe_apply_error(exc)
+        _write_runtime_log(f'Key apply rejected: protocol={proto} code={code}')
+        raise RuntimeError(message) from None
     if result is None:
         return None
     if result == 'unhealthy':
         raise RuntimeError('Ключ сохранён, но передача данных через него сейчас не подтверждена. '
                            'Xray не перезапускался.')
     label = (_proxy_apply_settings().get(proto) or {}).get('label', proto)
-    message = f'✅ {label}: ключ подтверждён, Xray работает без перезапуска.'
+    message = (f'✅ {label}: ключ подтверждён, Xray работает без перезапуска.' if require_health else
+               f'✅ {label}: ключ применён без перезапуска Xray. Доступность сервера проверяется отдельно.')
+    if not key.strip():
+        message = f'✅ {label}: ключ удалён, направление отключено. Общий Xray не перезапускался.'
+    if result == 'cold':
+        message = (f'✅ {label}: настройки применены с перезапуском Xray: для этого изменения горячее применение недоступно. '
+                   + ('Доступность сервера проверяется отдельно.' if key.strip() else 'Направление отключено.'))
     if result.startswith('hot') and proto in ('trojan', 'shadowsocks'):
-        message += f' Перезапущена только отдельная служба {label}.'
+        message += (f' Перезапущена только отдельная служба {label}.' if key.strip() else
+                    f' Отдельная служба {label} остановлена.')
     if result == 'hot_cleanup_pending':
         message += ' Очистка прежнего обработчика отложена; следующая смена требует восстановления.'
     return message
@@ -16552,7 +16631,11 @@ def _live_key_pool_updates(proto, key):
     if not _app_mode_pool_enabled():
         return {}
     store = _key_pool_store()
-    pools = store.set_active_key(store.load_key_pools(KEY_POOLS_PATH), proto, key)
+    pools = store.load_key_pools(KEY_POOLS_PATH)
+    for removed in getattr(_pool_delete_context, 'removed_keys', ()):
+        pools, _ = store.delete_pool_key(pools, proto, removed)
+    if key.strip():
+        pools = store.set_active_key(pools, proto, key)
     pools, _ = store.repair_key_pool_protocols(pools)
     data = json.dumps(pools, ensure_ascii=False, indent=2).encode('utf-8')
     return {KEY_POOLS_PATH: data, KEY_POOLS_PATH + store.RECOVERY_SUFFIX: data}
@@ -16585,11 +16668,15 @@ def _initialize_proxy_live_backend(control):
         detach_qualified=True, key_encoder=lambda protocol, key: encode_key(protocol, key, ports=service_ports),
         service_protocols=('shadowsocks', 'trojan'),
         service_qualifier=qualify_service_outbound,
-        service_apply=lambda protocol: restart_service(protocol, int(service_ports[protocol])),
+        service_apply=lambda protocol: restart_service(protocol, int(service_ports[protocol]),
+                                                       enabled=bool(_load_current_keys().get(protocol))),
         metadata_paths=(KEY_POOLS_PATH, KEY_POOLS_PATH + _key_pool_store().RECOVERY_SUFFIX),
         metadata_lock=key_pool_lock, metadata_updates=_live_key_pool_updates,
         resource_guard=lambda: (_available_memory_kb() or 0) >= 65536,
         max_attempts_per_minute=6,
+        key_aliases={proto: _v2ray_key_file_candidates(path)[1:] for proto, path in
+                     (('vless', VLESS_KEY_PATH), ('vless2', VLESS2_KEY_PATH),
+                      ('vmess', VMESS_KEY_PATH), ('hysteria2', HYSTERIA2_KEY_PATH))},
     )
     # Recovery must finish before config rebuild, background tasks or web start.
     # An invalid/inconsistent journal deliberately aborts startup, never
@@ -16609,7 +16696,7 @@ def _initialize_proxy_apply_control():
     pool_apply_lock = core_proxy_config_write_lock = control.lock
     install_proxy_controls(
         globals(), control,
-        manual=('_apply_manual_key_safely',),
+        manual=('_apply_manual_key_safely', '_delete_pool_key', '_clear_pool'),
         background=('_attempt_auto_failover', '_attempt_youtube_failover'),
         recoveries={
             '_recover_interrupted_youtube_failover_transaction': lambda: os.path.exists(YOUTUBE_FAILOVER_TRANSACTION_FILE),
@@ -16624,7 +16711,7 @@ def _initialize_proxy_apply_control():
             '_restart_core_proxy_after_validation', '_restart_core_proxy_at_startup',
             '_restart_proxy_services_for_protocols',
             '_check_startup_proxy_endpoint', '_restore_startup_proxy_mode',
-            '_delete_pool_key', '_clear_pool', '_clear_installed_key_for_protocol', '_repair_active_reality_endpoint',
+            '_clear_installed_key_for_protocol', '_repair_active_reality_endpoint',
             '_restart_core_proxy_and_recheck_youtube', '_restore_youtube_key_after_failed_failover',
             '_sanitize_xray26_compat_files', 'update_proxy',
             '_apply_entries_to_unblock_list', '_append_entries_to_unblock_list', '_service_route_worker_mutation',

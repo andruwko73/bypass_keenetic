@@ -11966,8 +11966,8 @@ def test_telegram_bot_menu_button_smoke():
         bot_module._app_mode_pool_enabled = lambda: True
         bot_module.pool_apply_lock = threading.Lock()
         bot_module._pause_pool_probe_for_apply = lambda: (apply_events.append('pause') or (True, 'paused'))
-        bot_module._install_key_for_protocol = lambda proto, key, verify=False: (
-            apply_events.append(('install', proto, key, verify)) or 'installed'
+        bot_module._install_key_for_protocol = lambda proto, key, verify=False, require_health=True: (
+            apply_events.append(('install', proto, key, verify, require_health)) or 'installed'
         )
         bot_module._set_active_key = lambda proto, key: apply_events.append(('active', proto, key))
         bot_module._audit_key_switch = lambda *args: apply_events.append(('audit', args))
@@ -11987,7 +11987,7 @@ def test_telegram_bot_menu_button_smoke():
             verify=False,
         ) == 'paused\ninstalled\nprobe scheduled'
         assert apply_events[0] == 'pause'
-        assert apply_events[1] == ('install', 'vless', manual_uri, False)
+        assert apply_events[1] == ('install', 'vless', manual_uri, False, False)
         assert ('active', 'vless', manual_uri) in apply_events
         assert ('applied-probe', 'vless', manual_uri, True) in apply_events
         assert 'resume' not in apply_events
@@ -12001,7 +12001,7 @@ def test_telegram_bot_menu_button_smoke():
             source='test_hysteria2_manual',
         ) == 'paused\ninstalled\nprobe scheduled'
         assert apply_events[0] == 'pause'
-        assert apply_events[1] == ('install', 'hysteria2', HYSTERIA2_KEY, False)
+        assert apply_events[1] == ('install', 'hysteria2', HYSTERIA2_KEY, False, False)
         assert ('active', 'hysteria2', HYSTERIA2_KEY) in apply_events
         assert ('applied-probe', 'hysteria2', HYSTERIA2_KEY, True) in apply_events
         assert 'resume' not in apply_events
@@ -12010,20 +12010,20 @@ def test_telegram_bot_menu_button_smoke():
         apply_events.clear()
         bot_module._load_current_keys = lambda: {'vless': manual_uri}
         bot_module._active_key_endpoint_healthy = lambda proto, key: True
-        assert 'без перезапуска' in bot_module._apply_manual_key_safely(
+        assert 'installed' in bot_module._apply_manual_key_safely(
             'vless',
             manual_uri,
             source='test_same_active',
             verify=False,
         )
-        assert not any(isinstance(event, tuple) and event[0] == 'install' for event in apply_events)
+        assert ('install', 'vless', manual_uri, False, False) in apply_events
         assert ('active', 'vless', manual_uri) in apply_events
         assert ('applied-probe', 'vless', manual_uri, True) in apply_events
 
         apply_events.clear()
         bot_module._active_key_endpoint_healthy = lambda proto, key: False
         assert bot_module._apply_pool_key('vless', manual_uri, schedule_probe=False) == 'paused\ninstalled'
-        assert ('install', 'vless', manual_uri, False) in apply_events
+        assert ('install', 'vless', manual_uri, False, False) in apply_events
         assert not any(isinstance(event, tuple) and event[0] == 'applied-probe' for event in apply_events)
         assert 'resume' in apply_events
 

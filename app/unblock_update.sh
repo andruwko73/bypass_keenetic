@@ -97,6 +97,17 @@ refresh_dns_backend() {
 	esac
 }
 
+# Check before init hooks can recreate a missing set as empty. A missing
+# unrelated set invalidates the caller's incremental update request.
+if [ -n "${BYPASS_ROUTE_SETS:-}" ]; then
+	for required_set in $SET_NAMES $EXTRA_SET_NAMES $IPV6_SET_NAMES; do
+		if ! ipset list "$required_set" >/dev/null 2>&1; then
+			unset BYPASS_ROUTE_SETS
+			break
+		fi
+	done
+fi
+
 [ -x /opt/etc/ndm/fs.d/100-ipset.sh ] && /opt/etc/ndm/fs.d/100-ipset.sh start
 
 for set_name in $SET_NAMES $EXTRA_SET_NAMES; do

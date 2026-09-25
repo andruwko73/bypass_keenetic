@@ -177,11 +177,20 @@ def _add_cross_transparent_domain_routes(config_data, inbound_tags, domain_overr
         config_data['routing']['rules'][0:0] = rules
 
 
+_DISABLED_KEY = object()
+
+
+def _configured_outbound(proto, key_value, tag):
+    if key_value is _DISABLED_KEY:
+        return {'tag': tag, 'protocol': 'blackhole'}
+    return proxy_outbound_from_key(proto, key_value, tag)
+
+
 def _add_socks_proxy(config_data, proto, key_value, socks_port, socks_tag, outbound_tag):
     if not key_value:
         return
     config_data['inbounds'].append(socks_inbound(socks_port, socks_tag))
-    config_data['outbounds'].append(proxy_outbound_from_key(proto, key_value, outbound_tag))
+    config_data['outbounds'].append(_configured_outbound(proto, key_value, outbound_tag))
     _add_proxy_route(config_data, [socks_tag], outbound_tag)
 
 
@@ -202,7 +211,7 @@ def _add_transparent_proxy(
         return None
     config_data['inbounds'].append(socks_inbound(socks_port, socks_tag))
     config_data['inbounds'].append(transparent_inbound(transparent_port, transparent_tag, route_only=route_only))
-    config_data['outbounds'].append(proxy_outbound_from_key(proto, key_value, outbound_tag))
+    config_data['outbounds'].append(_configured_outbound(proto, key_value, outbound_tag))
     _add_proxy_route(config_data, [socks_tag], outbound_tag)
     if strict_policy is None:
         _add_proxy_route(config_data, [transparent_tag], outbound_tag)
@@ -240,7 +249,17 @@ def build_proxy_core_config(
     transparent_route_policies=None,
     cross_route_domain_overrides=None,
     bittorrent_direct_enabled=False,
+    reserve_protocol_slots=False,
 ):
+    # A fixed topology permits first-key install and last-key deletion through
+    # the same qualified outbound transaction. Empty slots block traffic.
+    if reserve_protocol_slots:
+        vmess_key = vmess_key or _DISABLED_KEY
+        vless_key = vless_key or _DISABLED_KEY
+        vless2_key = vless2_key or _DISABLED_KEY
+        shadowsocks_key = shadowsocks_key or _DISABLED_KEY
+        trojan_key = trojan_key or _DISABLED_KEY
+        hysteria2_key = hysteria2_key or _DISABLED_KEY
     config_data = xray_base_config(
         error_log_path=error_log_path,
         access_log_path=access_log_path,

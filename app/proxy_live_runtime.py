@@ -35,11 +35,14 @@ class ProxyLiveRuntime:
                  allowed_protocols=(), max_retained=8, detach_qualified=False, api=None,
                  metadata_paths=(), metadata_lock=None, metadata_updates=None,
                  resource_guard=None, max_attempts_per_minute=0,
-                 key_encoder=None, service_protocols=(), service_apply=None, service_qualifier=None):
+                 key_encoder=None, service_protocols=(), service_apply=None, service_qualifier=None,
+                 key_aliases=None):
         self.coordinator = coordinator
         self.directory, self.ram_directory = Path(directory), Path(ram_directory)
         self.config_path = Path(config_path).absolute()
         self.key_paths = {key: Path(path).absolute() for key, path in key_paths.items()}
+        self.key_aliases = {key: [Path(path).absolute() for path in paths]
+                            for key, paths in (key_aliases or {}).items()}
         self.receipt_path = (self.directory / 'applied.json').absolute()
         self.pending_path = self.directory / 'pending.json'
         self.api_port, self.clock = api_port, clock
@@ -64,7 +67,8 @@ class ProxyLiveRuntime:
         self.attestation = AttestationStore(self.ram_directory / 'health.json')
         self.hysteria_guard = HysteriaCacheGuard(self.ram_directory / 'hysteria-cache.json')
         self.bundle = ApplyFileBundle(self.directory, [self.config_path, self.receipt_path,
-                                                      *self.key_paths.values(), *metadata_paths])
+                                                      *self.key_paths.values(), *metadata_paths,
+                                                      *(path for paths in self.key_aliases.values() for path in paths)])
 
     def _owned(self):
         import threading
@@ -101,6 +105,19 @@ class ProxyLiveRuntime:
     def config_for_load(self, logical):
         return managed_config(logical, api_port=self.api_port, targets=self._targets(logical))
 
+    def confirms_config(self, logical):
+        """Read-only no-op proof for a route edit; no network health inference."""
+        self._owned()
+        if self.bundle.pending() or self.pending_path.exists():
+            return False
+        state = self._receipt()
+        if (not state or state['fingerprint'] != config_fingerprint(logical) or
+                state['process_identity'] != self.identity()):
+            return False
+        disk, _ = _regular(self.config_path, 2 * 1024 * 1024)
+        return (disk is not None and json.loads(disk) == self.config_for_load(logical) and
+                state['observed'] == self._observe(state['targets']))
+
     def _observe(self, targets):
         return self.api.observation([balancer_tag(tag) for tag in targets])
 
@@ -108,6 +125,17 @@ class ProxyLiveRuntime:
         self._owned()
         if self.bundle.pending():
             raise LiveApplyError('File recovery must precede a controlled load')
+        identity, targets, observed = self._inspect_controlled_load(logical, previous_identity)
+        state = {'schema': 1, 'process_identity': identity, 'generation': generation,
+                 'logical': logical, 'fingerprint': config_fingerprint(logical),
+                 'targets': targets, 'retained': [], 'observed': observed}
+        _atomic_json(self.receipt_path, state)
+        self.hysteria_guard.initialize(logical, identity)
+        self.attestation.record_loaded(logical, process_identity=identity,
+                                       generation=generation, observed_fingerprint=observed)
+        self._clear_pending()
+
+    def _inspect_controlled_load(self, logical, previous_identity):
         identity = self.identity()
         if not identity or identity == previous_identity:
             raise LiveApplyError('A new controlled core process was not confirmed')
@@ -123,16 +151,65 @@ class ProxyLiveRuntime:
         observed = self._observe(targets)
         if identity != self.identity():
             raise LiveApplyError('Core changed during load confirmation')
-        state = {'schema': 1, 'process_identity': identity, 'generation': generation,
-                 'logical': logical, 'fingerprint': config_fingerprint(logical),
-                 'targets': targets, 'retained': [], 'observed': observed}
-        _atomic_json(self.receipt_path, state)
-        self.hysteria_guard.initialize(logical, identity)
-        self.attestation.record_loaded(logical, process_identity=identity,
-                                       generation=generation, observed_fingerprint=observed)
-        # A planned full load supersedes any runtime-only interrupted operation;
-        # file journal recovery must already have happened before the load.
-        self._clear_pending()
+        return identity, targets, observed
+
+    def apply_cold_manual(self, protocol, key, *, current, desired, ticket, restart):
+        """Explicit unsupported-hot case, with validated files and local rollback.
+
+        A network probe is never involved. Common-core restart is permitted only
+        when try_apply returned None, never as a reaction to its exception.
+        """
+        self._owned()
+        if not self.confirms_config(current):
+            raise LiveApplyError('Cold apply requires an attested current runtime')
+        if self.resource_guard is not None and self.resource_guard() is not True:
+            raise LiveApplyError('Insufficient resource budget for controlled apply')
+        candidate = self.config_for_load(desired)
+        self.api.validate(candidate)
+        self.coordinator.require_current(ticket)
+        if not self.confirms_config(current):
+            raise LiveApplyError('Runtime changed during cold apply validation')
+        previous_identity = self.identity()
+        started = False
+        with (self.metadata_lock if self.metadata_lock is not None else nullcontext()):
+            updates = {self.key_paths[protocol]: self.key_encoder(protocol, key),
+                       self.config_path: json.dumps(candidate, ensure_ascii=False, indent=2).encode('utf-8')}
+            if not key.strip():
+                updates.update({path: b'' for path in self.key_aliases.get(protocol, []) if path.exists()})
+            if self.metadata_updates is not None:
+                extra = {Path(path).absolute(): data for path, data in self.metadata_updates(protocol, key).items()}
+                if (set(updates) | {self.receipt_path}) & extra.keys():
+                    raise LiveApplyError('Metadata cannot replace a core transaction file')
+                updates.update(extra)
+            with self.coordinator.commit_guard(ticket):
+                _atomic_json(self.pending_path, {'phase': 'cold_prepared', 'logical_tag': 'proxy-' + protocol})
+                try:
+                    self.bundle.prepare(updates)
+                    def activate():
+                        nonlocal started
+                        started = True
+                        if restart(protocol) is not True:
+                            return False
+                        self._inspect_controlled_load(desired, previous_identity)
+                        return True
+                    self.bundle.commit(after_write=activate)
+                except Exception as cause:
+                    try:
+                        recovered = self.bundle.recover()
+                        if recovered == 'committed':
+                            self.register_controlled_load(desired, previous_identity=previous_identity, generation=ticket.generation)
+                            return 'cold'
+                        if started:
+                            failed_identity = self.identity()
+                            if restart(protocol) is not True:
+                                raise LiveApplyError('Cold recovery service failed')
+                            self.register_controlled_load(current, previous_identity=failed_identity, generation=ticket.generation)
+                        self._clear_pending()
+                    except Exception:
+                        raise LiveApplyError('Cold recovery is uncertain') from None
+                    raise LiveApplyError('Cold apply failed; previous files and runtime restored') from cause
+                self.register_controlled_load(desired, previous_identity=previous_identity, generation=ticket.generation)
+        return 'cold'
 
     def _clear_pending(self):
         try:
@@ -193,7 +270,8 @@ class ProxyLiveRuntime:
         state.update(updated)
         self._clear_pending()
 
-    def try_apply(self, protocol, key, *, current, desired, ticket, verify, precheck):
+    def try_apply(self, protocol, key, *, current, desired, ticket, verify, precheck,
+                  require_health=True):
         """Return 'hot'/'noop'/'unhealthy', or None for an explicit cold change.
 
         The caller must not interpret an exception as a cold-restart request.
@@ -236,6 +314,28 @@ class ProxyLiveRuntime:
             # destination. Do not run a misleading "healthy" probe with old auth.
             return None
         if change == ChangeKind.UNCHANGED:
+            if not require_health:
+                # Attestation above confirms the installed state, not network
+                # reachability. Preserve existing health evidence as-is.
+                # Different labels can describe the same effective outbound.
+                # Still persist the chosen text and any pool deletion together.
+                with (self.metadata_lock if self.metadata_lock is not None else nullcontext()):
+                    updates = {self.key_paths[protocol]: self.key_encoder(protocol, key)}
+                    if not key.strip():
+                        updates.update({path: b'' for path in self.key_aliases.get(protocol, []) if path.exists()})
+                    if self.metadata_updates is not None:
+                        extra = {Path(path).absolute(): data for path, data in self.metadata_updates(protocol, key).items()}
+                        if (set(updates) | {self.config_path, self.receipt_path}) & extra.keys():
+                            raise LiveApplyError('Metadata cannot replace a core transaction file')
+                        updates.update(extra)
+                    with self.coordinator.commit_guard(ticket):
+                        self.bundle.prepare(updates)
+                        try:
+                            self.bundle.commit()
+                        except (OSError, ApplyStateError):
+                            if self.bundle.recover() != 'committed':
+                                raise LiveApplyError('File commit was rolled back') from None
+                return 'noop_unchecked'
             evidence = self.attestation.evidence(protocol, observed_fingerprint=observed)
             plan = plan_proxy_apply(current, desired, evidence=evidence, process_identity=identity,
                                     generation=state['generation'], process_running=True, now=self.clock())
@@ -265,7 +365,7 @@ class ProxyLiveRuntime:
         targets = dict(state['targets'], **{logical_tag: new_target})
         candidate_config = managed_config(desired, api_port=self.api_port, targets=targets)
         self.api.validate(candidate_config)
-        if precheck() is not True:
+        if require_health and precheck() is not True:
             raise LiveApplyError('Isolated candidate verification failed')
         self.coordinator.require_current(ticket)
 
@@ -292,6 +392,10 @@ class ProxyLiveRuntime:
                     self.config_path: json.dumps(candidate_config, ensure_ascii=False, indent=2).encode('utf-8'),
                     self.receipt_path: json.dumps(new_state, separators=(',', ':')).encode('utf-8'),
                 }
+                if not key.strip():
+                    # Prevent legacy fallback files resurrecting a deleted key.
+                    updates.update({path: b'' for path in self.key_aliases.get(protocol, [])
+                                    if path.exists()})
                 if self.metadata_updates is not None:
                     extra = {Path(path).absolute(): data
                              for path, data in self.metadata_updates(protocol, key).items()}
@@ -333,7 +437,8 @@ class ProxyLiveRuntime:
             switch_prepared_outbound(
                 self.api, logical_tag=logical_tag, old_target=state['targets'][logical_tag],
                 candidate=new_out[logical_tag], generation=ticket.generation, checkpoint=checkpoint,
-                require_current=lambda: self.coordinator.require_current(ticket), verify=verify,
+                require_current=lambda: self.coordinator.require_current(ticket),
+                verify=verify if require_health else None,
                 persist=persist, current_identity=self.identity, expected_identity=identity,
             )
         except LiveApplyError:
@@ -353,9 +458,10 @@ class ProxyLiveRuntime:
                 cleanup_deferred = True
         self.attestation.record_loaded(desired, process_identity=identity, generation=ticket.generation,
                                        observed_fingerprint=state['observed'])
-        self.attestation.record_health(protocol, config=desired, process_identity=identity,
-                                       generation=ticket.generation, observed_fingerprint=state['observed'],
-                                       checked_at=self.clock(), healthy=True)
+        if require_health:
+            self.attestation.record_health(protocol, config=desired, process_identity=identity,
+                                           generation=ticket.generation, observed_fingerprint=state['observed'],
+                                           checked_at=self.clock(), healthy=True)
         if not cleanup_deferred:
             self._clear_pending()
         return 'hot_cleanup_pending' if cleanup_deferred else 'hot'

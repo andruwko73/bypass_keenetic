@@ -32,8 +32,7 @@ def test_application_registry_binds_real_entry_points_and_shared_lock(tmp_path):
         for key in registration.keywords
     }
     assert all(name in functions for values in groups.values() for name in values)
-    assert '_clear_pool' in groups['writers'], 'take apply lock before the pool lock'
-    assert '_apply_manual_key_safely' in groups['manual']
+    assert {'_apply_manual_key_safely', '_delete_pool_key', '_clear_pool'} <= set(groups['manual'])
     assert {'_attempt_auto_failover', '_attempt_youtube_failover'} <= set(groups['background'])
     env = {'ApplyCoordinator': ApplyCoordinator, 'install_proxy_controls': install_proxy_controls,
            'private_runtime_directory': lambda _: tmp_path, 'proxy_apply_control': None,
@@ -56,7 +55,11 @@ def test_application_registry_binds_real_entry_points_and_shared_lock(tmp_path):
     for proto, handler in env['PROXY_KEY_INSTALLERS'].items():
         assert handler is env[proto]
         assert handler._proxy_control_kind == 'writer'
-    assert env['_apply_manual_key_safely']().manual_epoch >= 1
+    for name in ('_apply_manual_key_safely', '_delete_pool_key', '_clear_pool'):
+        before = control.token()
+        ticket = env[name]()
+        assert ticket.manual_epoch >= 1
+        assert control.token() != before, 'manual deletion must invalidate queued automatic probes'
     for service in ('youtube', 'telegram'):
         recovery = env[f'_recover_interrupted_{service}_failover_transaction']
         journal = env[f'{service.upper()}_FAILOVER_TRANSACTION_FILE']

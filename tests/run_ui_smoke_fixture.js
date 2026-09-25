@@ -1,10 +1,14 @@
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const http = require('http');
 const net = require('net');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
-const python = process.platform === 'win32' ? 'py' : 'python3';
+// Launch the interpreter itself so fixture.kill() also stops the HTTP server.
+// Killing the Windows py launcher can leave its Python child behind.
+const python = process.platform === 'win32'
+  ? spawnSync('py', ['-3.11', '-c', 'import sys; print(sys.executable)'], {encoding:'utf8'}).stdout.trim()
+  : 'python3';
 
 function selectPort() {
   const requested = Number(process.env.BYPASS_UI_FIXTURE_PORT || 0);
@@ -98,9 +102,7 @@ async function runConcurrencySmoke(port) {
 
 async function main() {
   const port = await selectPort();
-  const pythonArgs = process.platform === 'win32'
-    ? ['-3.11', 'tests/ui_fixture_server.py', '--port', String(port)]
-    : ['tests/ui_fixture_server.py', '--port', String(port)];
+  const pythonArgs = [path.join(root, 'tests/ui_fixture_server.py'), '--port', String(port)];
   const fixture = spawn(python, pythonArgs, { cwd: root, stdio: 'ignore' });
   try {
     await waitForFixture(port, Date.now() + 15000);

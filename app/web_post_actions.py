@@ -307,11 +307,16 @@ def _service_profile_apply(ctx, data):
 
 
 def _route_list_move(ctx, data):
+    import route_move_runtime
+    if not route_move_runtime.begin():
+        return _result('Перенос уже выполняется. Дождитесь завершения.', success=False)
     try:
         moved = _ctx(ctx, 'move_route_list')(
             form_value(data, 'source_list'), form_value(data, 'target_list'))
     except Exception as exc:
         return _result(f'Не удалось перенести список: {exc}', success=False)
+    finally:
+        route_move_runtime.finish()
     message = (
         f"Список {moved['source_label']} перенесён в {moved['target_label']}. "
         f"Адресов: {moved['entries']}. Исходный список очищен."

@@ -514,6 +514,10 @@ domain_in_list() {
 
 resolve_priority_ipv4() {
 	priority_domain="$1"
+	if [ -f "$tmp_dir/priority.answers" ]; then
+		awk -v domain="$priority_domain" '$1 == domain && $2 == "A" {print $3}' "$tmp_dir/priority.answers"
+		return
+	fi
 	dig +time=2 +tries=1 +short "$priority_domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
 		| grep -Eo "$IPV4_RE" \
 		| grep -vE "$LOCAL_RE" \
@@ -522,6 +526,10 @@ resolve_priority_ipv4() {
 
 resolve_priority_ipv6() {
 	priority_domain="$1"
+	if [ -f "$tmp_dir/priority.answers" ]; then
+		awk -v domain="$priority_domain" '$1 == domain && $2 == "AAAA" {print $3}' "$tmp_dir/priority.answers"
+		return
+	fi
 	dig +time=2 +tries=1 +short AAAA "$priority_domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
 		| grep -E "^[0-9A-Fa-f:]+$" \
 		| grep ":" \
@@ -530,6 +538,8 @@ resolve_priority_ipv6() {
 }
 
 apply_vless_priority_domain_ips() {
+	priority_restore_file="$tmp_dir/priority.restore"
+	: > "$priority_restore_file"
 	vless_set="$1"
 	vless2_set="$2"
 	vless6_set="$3"
@@ -605,21 +615,20 @@ apply_vless_priority_domain_ips() {
 
 		resolve_priority_ipv4 "$priority_domain" | while IFS= read -r priority_ip; do
 			[ -n "$priority_ip" ] || continue
-			ipset add "$winner_set" "$priority_ip" -exist >/dev/null 2>&1 || true
-			ipset add "$winner_priority_set" "$priority_ip" -exist >/dev/null 2>&1 || true
-			ipset del "$loser_set" "$priority_ip" >/dev/null 2>&1 || true
-			ipset del "$loser_priority_set" "$priority_ip" >/dev/null 2>&1 || true
+			printf 'add %s %s\nadd %s %s\ndel %s %s\ndel %s %s\n' \
+				"$winner_set" "$priority_ip" "$winner_priority_set" "$priority_ip" \
+				"$loser_set" "$priority_ip" "$loser_priority_set" "$priority_ip" >> "$priority_restore_file"
 		done
 		if ipset list "$winner6_set" >/dev/null 2>&1 && ipset list "$loser6_set" >/dev/null 2>&1; then
 			resolve_priority_ipv6 "$priority_domain" | while IFS= read -r priority_ip6; do
 				[ -n "$priority_ip6" ] || continue
-				ipset add "$winner6_set" "$priority_ip6" -exist >/dev/null 2>&1 || true
-				ipset add "$winner_priority6_set" "$priority_ip6" -exist >/dev/null 2>&1 || true
-				ipset del "$loser6_set" "$priority_ip6" >/dev/null 2>&1 || true
-				ipset del "$loser_priority6_set" "$priority_ip6" >/dev/null 2>&1 || true
+				printf 'add %s %s\nadd %s %s\ndel %s %s\ndel %s %s\n' \
+					"$winner6_set" "$priority_ip6" "$winner_priority6_set" "$priority_ip6" \
+					"$loser6_set" "$priority_ip6" "$loser_priority6_set" "$priority_ip6" >> "$priority_restore_file"
 			done
 		fi
 	done
+	[ ! -s "$priority_restore_file" ] || ipset restore -exist < "$priority_restore_file" >/dev/null 2>&1 || fail_status "Priority ipset update failed."
 }
 
 xargs_parallel_flag() {
@@ -941,6 +950,16 @@ load_file_to_set() {
 	mirror_tmp_set="$5"
 	ipv6_set_name="$6"
 	ipv6_tmp_set="$7"
+	if [ -n "${BYPASS_ROUTE_SETS:-}" ]; then
+		case " $BYPASS_ROUTE_SETS " in
+			*" $set_name "*) ;;
+			*)
+				for unchanged in "$set_name" "$mirror_set_name" "$ipv6_set_name"; do
+					: > "$tmp_dir/$unchanged.unchanged"
+				done
+				return 0 ;;
+		esac
+	fi
 	prepare_temp_set "$set_name" "$main_tmp_set"
 	if [ -n "$mirror_set_name" ] && [ -n "$mirror_tmp_set" ]; then
 		prepare_temp_set "$mirror_set_name" "$mirror_tmp_set"
@@ -966,8 +985,10 @@ load_file_to_set() {
 
 	parse_list_entries || fail_status "Не удалось разобрать список; прежние ipset сохранены."
 
-	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set" "$mirror_domain_file"
-	resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"
+	if [ "$batch_dns" != "1" ]; then
+		resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set" "$mirror_domain_file"
+		resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"
+	fi
 }
 
 entry_count_for_tmp_set() {
@@ -1001,6 +1022,10 @@ filter_restore_exact_overlap() {
 }
 
 remove_runtime_overlap_from_set() {
+	if [ -n "${overlap_batch_file:-}" ]; then
+		printf '%s %s\n' "$1" "$2" >> "$overlap_batch_file"
+		return
+	fi
 	loser_set="$1"
 	winner_set="$2"
 	[ -n "$loser_set" ] && [ -n "$winner_set" ] || return 0
@@ -1015,6 +1040,18 @@ remove_runtime_overlap_from_set() {
 			ipset del "$loser_set" "$member" >/dev/null 2>&1 || true
 		fi
 	done
+}
+
+finish_overlap_batch() {
+	overlap_pairs="$overlap_batch_file"
+	overlap_batch_file=""
+	[ -s "$overlap_pairs" ] || return 0
+	if [ -n "$python_bin" ] && [ -f "$BOT_DIR/route_ipset_batch.py" ]; then
+		"$python_bin" "$BOT_DIR/route_ipset_batch.py" "$overlap_pairs" && return 0
+	fi
+	while read -r loser winner; do
+		remove_runtime_overlap_from_set "$loser" "$winner"
+	done < "$overlap_pairs"
 }
 
 dedupe_vless_runtime_restore() {
@@ -1050,6 +1087,8 @@ dedupe_vless_runtime_restore() {
 
 dedupe_vless_runtime_ipsets() {
 	[ "$RUNTIME_IPSET_DEDUPE_ENABLED" = "0" ] && return 0
+	overlap_batch_file="$tmp_dir/overlap.pairs"
+	: > "$overlap_batch_file"
 	case "$(youtube_route_protocol)" in
 		vless2)
 			remove_runtime_overlap_from_set "tmp_unblockvless_$$" "tmp_unblockvless2_$$"
@@ -1064,10 +1103,13 @@ dedupe_vless_runtime_ipsets() {
 		*)
 			;;
 	esac
+	finish_overlap_batch
 }
 
 dedupe_vless_final_ipsets() {
 	[ "$RUNTIME_IPSET_DEDUPE_ENABLED" = "0" ] && return 0
+	overlap_batch_file="$tmp_dir/overlap.pairs"
+	: > "$overlap_batch_file"
 	case "$(youtube_route_protocol)" in
 		vless2)
 			remove_runtime_overlap_from_set "unblockvless" "unblockvless2"
@@ -1088,11 +1130,13 @@ dedupe_vless_final_ipsets() {
 		*)
 			;;
 	esac
+	finish_overlap_batch
 }
 
 swap_or_preserve_set() {
 	set_name="$1"
 	swap_tmp_set="$2"
+	[ -f "$tmp_dir/$set_name.unchanged" ] && return 0
 	entry_count="$(entry_count_for_tmp_set "$swap_tmp_set")"
 	current_count="$(ipset_count "$set_name")"
 	[ -n "$current_count" ] || current_count=0
@@ -1137,6 +1181,26 @@ swap_or_preserve_set() {
 UDP_QUIC_POLICY_SOURCE="$(udp_quic_policy_source || true)"
 UDP_QUIC_EXCLUDE_SOURCE="$(udp_quic_exclude_source || true)"
 
+# Batched resolver is optional only for older installations during migration.
+# If it fails, do not publish partially prepared sets.
+python_bin="/opt/bin/python3"
+[ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+batch_dns=0
+[ -n "$python_bin" ] && [ -f "$BOT_DIR/route_dns_batch.py" ] && batch_dns=1
+export DNS_HOST DNS_PORT PARALLEL_JOBS YOUTUBE_DNS_SAMPLE_SERVERS VLESS_PRIORITY_DOMAINS UDP_QUIC_EXCLUDE_SOURCE
+
+# Explicit list moves can avoid unrelated sets only after a complete refresh
+# under the same policy. Vless priority/overlap sets are always dependencies.
+policy_stamp="$(cat "$UDP_QUIC_POLICY_SOURCE" "$UDP_QUIC_EXCLUDE_SOURCE" "$BOT_DIR/route_dns_batch.py" "$BOT_DIR/route_ipset_batch.py" 2>/dev/null | cksum)"
+policy_state="${ROUTE_IPSET_POLICY_STATE:-/tmp/bypass-ipset-policy.stamp}"
+if [ -n "${BYPASS_ROUTE_SETS:-}" ]; then
+	[ "$(cat "$policy_state" 2>/dev/null)" = "$policy_stamp" ] || BYPASS_ROUTE_SETS=""
+	for required_set in $SET_NAMES $EXTRA_SET_NAMES $IPV6_SET_NAMES; do
+		ipset list "$required_set" >/dev/null 2>&1 || BYPASS_ROUTE_SETS=""
+	done
+	[ -z "$BYPASS_ROUTE_SETS" ] || BYPASS_ROUTE_SETS="$BYPASS_ROUTE_SETS unblockvless unblockvless2"
+fi
+
 cleanup_stale_tmp_unblock_sets
 
 wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAIT_SECONDS}s; old ipset contents preserved."
@@ -1147,6 +1211,14 @@ load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$" unb
 load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$" unblockvless2udp "tmp_unblockvless2udp_$$" unblockvless2v6 "tmp_unblockvless2v6_$$"
 load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$" unblocktrojudp "tmp_unblocktrojudp_$$" unblocktroj6 "tmp_unblocktroj6_$$"
 load_file_to_set "$UNBLOCK_DIR/hysteria2.txt" unblockhy2 "tmp_unblockhy2_$$" unblockhy2udp "tmp_unblockhy2udp_$$" unblockhy26 "tmp_unblockhy26_$$"
+
+if [ "$batch_dns" = "1" ]; then
+	BATCH_IPV6_ALL=0
+	ipv6_resolve_should_run && BATCH_IPV6_ALL=1
+	export BATCH_IPV6_ALL
+	"$python_bin" "$BOT_DIR/route_dns_batch.py" "$tmp_dir" "$$" || fail_status "DNS batch failed; old ipset contents preserved."
+	cat "$tmp_dir/dns.restore" >> "$restore_file"
+fi
 
 sort -u "$restore_file" > "$sorted_restore_file"
 dedupe_vless_runtime_restore
@@ -1189,4 +1261,7 @@ if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
 fi
 
 write_status success "ipset refresh completed."
+if [ -z "${BYPASS_ROUTE_SETS:-}" ] && [ ! -L "$policy_state" ]; then
+	printf '%s\n' "$policy_stamp" > "$policy_state"
+fi
 exit 0

@@ -53,11 +53,16 @@ async function checkBulkRoutes(page, mode, viewport) {
   const editor = page.locator('[data-list-panel="hysteria2.txt"] textarea');
   const original = await editor.inputValue();
   let requests = [], fail = false;
+  let responseDelay = 180, progressRequests = 0;
   let contents = {};
+  await page.route('**/api/route_move_status', async route => {
+    progressRequests++;
+    await route.fulfill({json:{running:true, stage:'Обновление DNS и адресов', elapsed_seconds:2}});
+  });
   await page.route('**/route_list_move', async route => {
     const params = new URLSearchParams(route.request().postData());
     requests.push([params.get('source_list'), params.get('target_list')]);
-    await new Promise(resolve => setTimeout(resolve, 180));
+    await new Promise(resolve => setTimeout(resolve, responseDelay));
     await route.fulfill({status:fail ? 503 : 200, contentType:'application/json',
       body:JSON.stringify(fail ? {ok:false,result:'Fixture refusal'} : {ok:true,result:'Список перенесён',list_contents:contents})});
   });
@@ -85,8 +90,13 @@ async function checkBulkRoutes(page, mode, viewport) {
       if (!(await menu.getAttribute('open') !== null)) await trigger.click();
       const form = menu.locator('form').filter({has:page.locator(`[name="target_list"][value="${target}"]`)});
       const start = requests.length;
+      responseDelay = target === files[0] ? 2200 : 180;
       await form.locator('button').click();
       await page.waitForFunction(() => document.querySelector('[data-list-panel].active textarea').disabled);
+      if (target === files[0]) {
+        await page.waitForFunction(() => document.querySelector('#web-action-message').textContent.includes('Обновление DNS и адресов'));
+        assert(progressRequests > 0, 'No actual move-stage polling');
+      }
       await form.evaluate(node => node.requestSubmit(node.querySelector('button')));
       await page.waitForFunction(() => !document.querySelector('[data-list-panel].active textarea').disabled);
       assert.equal(requests.length, start+1, 'Duplicate bulk apply');
@@ -145,7 +155,14 @@ async function checkBulkRoutes(page, mode, viewport) {
     await page.waitForTimeout(100);
     assert.equal(await page.locator('[data-list-panel="vless.txt"] textarea').inputValue(), '');
     await page.unroute('**/api/unblock_list?name=vless.txt');
-  } finally { refusedPages.delete(page); await page.unroute('**/route_list_move'); }
+    const pollsAtEnd = progressRequests;
+    await page.waitForTimeout(1700);
+    assert.equal(progressRequests, pollsAtEnd, 'Move polling continued after completion');
+  } finally {
+    refusedPages.delete(page);
+    await page.unroute('**/route_list_move');
+    await page.unroute('**/api/route_move_status');
+  }
 }
 
 module.exports = { checkBulkRoutes, isExpectedBulkError };

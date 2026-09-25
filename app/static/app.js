@@ -3932,6 +3932,28 @@
                             markProtocolPending(proto);
                         }
                         showActionMessage('⏳ Выполняется действие. Страница останется на месте', true);
+                        let movePollDone = false;
+                        let movePollTimer = null;
+                        let movePollAbort = null;
+                        let moveStage = '';
+                        function pollMoveStage() {
+                            if (movePollDone) return;
+                            movePollAbort = new AbortController();
+                            const timeout = window.setTimeout(function() { if (movePollAbort) movePollAbort.abort(); }, 3000);
+                            fetch('/api/route_move_status', {credentials: 'same-origin', cache: 'no-store', signal: movePollAbort.signal})
+                                .then(function(response) { return response.ok ? response.json() : null; })
+                                .then(function(progress) {
+                                    if (!movePollDone && progress && progress.running && progress.stage !== moveStage) {
+                                        moveStage = progress.stage;
+                                        showActionMessage('⏳ ' + moveStage + '. Страница останется на месте', true);
+                                    }
+                                }).catch(function() {}).finally(function() {
+                                    window.clearTimeout(timeout);
+                                    movePollAbort = null;
+                                    if (!movePollDone) movePollTimer = window.setTimeout(pollMoveStage, 1500);
+                                });
+                        }
+                        if (releaseBulkEditors) movePollTimer = window.setTimeout(pollMoveStage, 1200);
                         const requestBody = new URLSearchParams();
                         formData.forEach(function(value, name) {
                             requestBody.append(name, value);
@@ -4104,6 +4126,9 @@
                             }
                         })
                         .finally(function() {
+                            movePollDone = true;
+                            window.clearTimeout(movePollTimer);
+                            if (movePollAbort) movePollAbort.abort();
                             if (listRequest) listRequestsPending--;
                             setButtonBusy(button, false);
                             if (releaseBulkEditors) releaseBulkEditors();

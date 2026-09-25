@@ -393,3 +393,89 @@ def test_native_success_cannot_bypass_dependent_service_capability(setup):
     result, _ = apply(runtime, config)
     assert result is None and runtime.api.calls == []
     assert runtime.key_paths['vless'].read_text() == 'old-key\n'
+
+
+def test_manual_same_outbound_new_label_commits_pool_without_health_or_api(setup):
+    runtime, config, _ = setup
+    pool = runtime.directory / 'pool.json'
+    runtime.bundle.allowed.add(str(pool.absolute()))
+    runtime.metadata_updates = lambda proto, key: {pool: json.dumps([key]).encode()}
+    ticket = runtime.coordinator.request_manual()
+    with runtime.coordinator.transaction(ticket, manual=True):
+        assert runtime.try_apply('vless', 'new-label', current=config, desired=config, ticket=ticket,
+            verify=lambda: pytest.fail('manual network check'), precheck=lambda: pytest.fail('manual candidate check'),
+            require_health=False) == 'noop_unchecked'
+    assert runtime.key_paths['vless'].read_text() == 'new-label\n'
+    assert json.loads(pool.read_text()) == ['new-label'] and runtime.api.calls == []
+
+
+def test_route_noop_requires_live_identity_disk_and_api(setup):
+    runtime, config, identity = setup
+    with runtime.coordinator.lock:
+        assert runtime.confirms_config(config)
+        runtime.api.handlers['foreign'] = {'protocol': 'freedom'}
+        assert not runtime.confirms_config(config)
+        del runtime.api.handlers['foreign']
+        identity[0] += ':changed'
+        assert not runtime.confirms_config(config)
+
+
+def test_cold_manual_rejects_runtime_change_during_validation(setup, monkeypatch):
+    runtime, current, identity = setup
+    monkeypatch.setattr(runtime.api, 'validate', lambda _: identity.__setitem__(0, identity[0] + ':foreign'))
+    ticket = runtime.coordinator.request_manual()
+    with runtime.coordinator.transaction(ticket, manual=True):
+        with pytest.raises(LiveApplyError, match='changed during'):
+            runtime.apply_cold_manual('vless', 'new', current=current, desired=current,
+                                      ticket=ticket, restart=lambda _: pytest.fail('Must not restart'))
+    assert runtime.key_paths['vless'].read_text() == 'old-key\n'
+    assert not runtime.pending_path.exists()
+
+
+@pytest.mark.parametrize('failure', [None, 'local_start', 'write', 'lost_commit_reply'])
+def test_explicit_cold_manual_checks_local_start_and_restores_files(setup, monkeypatch, failure):
+    runtime, current, identity = setup
+    desired = deepcopy(current)
+    desired['outbounds'][0]['settings']['synthetic'] = 'cold-key'
+    before = runtime.config_path.read_bytes()
+    restarts = []
+    def restart(protocol):
+        saved = runtime.key_paths[protocol].read_text().strip()
+        restarts.append(saved)
+        identity[0] += ':restart'
+        if failure == 'local_start' and saved == 'cold-key':
+            return False
+        runtime.api.load(json.loads(runtime.config_path.read_text()))
+        return True
+    if failure == 'write':
+        original = runtime.bundle._write
+        def write(item, value):
+            if value == b'cold-key\n':
+                raise OSError('synthetic disk full')
+            original(item, value)
+        monkeypatch.setattr(runtime.bundle, '_write', write)
+    if failure == 'lost_commit_reply':
+        original = runtime.bundle._clear
+        first = [True]
+        def clear():
+            if first[0]:
+                first[0] = False
+                raise OSError('synthetic lost reply')
+            original()
+        monkeypatch.setattr(runtime.bundle, '_clear', clear)
+    ticket = runtime.coordinator.request_manual()
+    with runtime.coordinator.transaction(ticket, manual=True):
+        if failure in ('local_start', 'write'):
+            with pytest.raises(LiveApplyError, match='restored'):
+                runtime.apply_cold_manual('vless', 'cold-key', current=current, desired=desired,
+                                          ticket=ticket, restart=restart)
+            assert runtime.config_path.read_bytes() == before
+            assert runtime.key_paths['vless'].read_text() == 'old-key\n'
+            assert runtime.confirms_config(current)
+        else:
+            assert runtime.apply_cold_manual('vless', 'cold-key', current=current, desired=desired,
+                                            ticket=ticket, restart=restart) == 'cold'
+            assert runtime.key_paths['vless'].read_text() == 'cold-key\n'
+            assert runtime.confirms_config(desired)
+    assert not runtime.pending_path.exists() and not runtime.bundle.pending()
+    assert restarts == ([] if failure == 'write' else ['cold-key', 'old-key'] if failure == 'local_start' else ['cold-key'])

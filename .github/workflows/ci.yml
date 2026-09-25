@@ -45,7 +45,7 @@ jobs:
         run: python -m pytest tests/test_route_quality.py tests/test_route_profiles.py tests/test_route_probe_runtime.py tests/test_route_diagnostics_runtime.py tests/test_route_diagnostics_service.py -q
 
       - name: Whole route list transfer
-        run: python -m pytest tests/test_route_list_move.py tests/test_web_pool_reads.py -q
+        run: python -m pytest tests/test_route_list_move.py tests/test_route_dns_batch.py tests/test_manual_key_policy.py tests/test_web_pool_reads.py -q
 
       - name: Pool quality display
         run: python -m pytest tests/test_pool_quality_display.py -q

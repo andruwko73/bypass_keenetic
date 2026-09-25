@@ -699,6 +699,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._json({"ok": False, "error": str(exc)}, status=400)
             return
+        if path == "/api/route_move_status":
+            self._json({"running": False, "stage": "", "elapsed_seconds": 0})
+            return
         if path == "/api/service_routes":
             self._json({"route_tools_html": _route_tools_html("")})
             return

@@ -508,3 +508,66 @@ def test_real_executor_preserves_control_and_recovers(lab, tmp_path, failure, ex
     for client in old:
         exchange(client, b'continuous', b'A')
     assert core.poll() is None
+
+
+@pytest.mark.parametrize('protocol', ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks', 'hysteria2'])
+def test_real_manual_offline_first_key_and_last_delete_preserve_other_stream(lab, tmp_path, protocol):
+    from copy import deepcopy
+    from proxy_apply_coordinator import ApplyCoordinator
+    from proxy_live_runtime import ProxyLiveRuntime
+    port, echo, start, api, connect = lab
+    target, control, managed, api_port = echo(b'A'), port(), port(), port()
+    tag = 'proxy-' + protocol
+    logical = {
+        'log': {'loglevel': 'none'},
+        'inbounds': [{'tag': name, 'protocol': 'dokodemo-door', 'listen': '127.0.0.1', 'port': value,
+                      'settings': {'address': '127.0.0.1', 'port': target, 'network': 'tcp'}}
+                     for name, value in [('control', control), ('managed', managed)]],
+        'outbounds': [{'tag': tag, 'protocol': 'blackhole'}, {'tag': 'control', 'protocol': 'freedom'}],
+        'routing': {'rules': [{'type': 'field', 'inboundTag': [name], 'outboundTag': outbound}
+                              for name, outbound in [('control', 'control'), ('managed', tag)]]},
+    }
+    core = start(managed_config(logical, api_port=api_port))
+    wait_api(core, api, api_port, balancer_tag(tag))
+    stream = connect(control)
+    exchange(stream, b'before', b'A')
+    private, ram = tmp_path / 'private', tmp_path / 'ram'
+    private.mkdir(); ram.mkdir()
+    coordinator = ApplyCoordinator(ram)
+    config, key = tmp_path / 'installed.json', tmp_path / 'key'
+    config.write_text(json.dumps(managed_config(logical, api_port=api_port)))
+    key.write_text('')
+    runtime = ProxyLiveRuntime(coordinator=coordinator, directory=private, ram_directory=ram,
+        config_path=config, key_paths={protocol: key}, binary=os.environ['XRAY_TEST_BINARY'],
+        api_port=api_port, identity=lambda: str(core.pid) if core.poll() is None else None,
+        allowed_protocols=(protocol,), api=XrayApi(os.environ['XRAY_TEST_BINARY'], port=api_port, directory=ram))
+    with coordinator.lock:
+        runtime.register_controlled_load(logical, previous_identity=None, generation=0)
+    if protocol == 'hysteria2':
+        offline = {'protocol': 'hysteria', 'settings': {'version': 2, 'address': '127.0.0.1', 'port': port()},
+                   'streamSettings': {'network': 'hysteria', 'security': 'tls',
+                       'hysteriaSettings': {'version': 2, 'auth': 'synthetic-offline'},
+                       'tlsSettings': {'serverName': 'localhost', 'alpn': ['h3']}}}
+    else:
+        _, offline = proxy_pair('vless' if protocol == 'vless2' else protocol, port(),
+                                '00000000-0000-4000-8000-000000000009')
+    desired = deepcopy(logical)
+    desired['outbounds'][0] = dict(offline, tag=tag)
+    for new_key, candidate in [('offline-key', desired), ('', logical)]:
+        ticket = coordinator.request_manual()
+        with coordinator.transaction(ticket, manual=True):
+            result = runtime.try_apply(protocol, new_key, current=logical if new_key else desired,
+                desired=candidate, ticket=ticket, require_health=False,
+                precheck=lambda: pytest.fail('manual precheck'), verify=lambda: pytest.fail('manual health veto'))
+            assert result == 'hot'
+            assert runtime.confirms_config(candidate)
+        assert key.read_text().strip() == new_key
+        exchange(stream, b'continuous', b'A')
+        assert core.poll() is None
+    # The disabled route must not silently become a direct connection.
+    disabled = connect(managed)
+    disabled.sendall(b'blocked')
+    try:
+        assert disabled.recv(64) == b''
+    except (ConnectionResetError, TimeoutError):
+        pass

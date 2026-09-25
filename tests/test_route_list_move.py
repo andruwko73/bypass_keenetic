@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -135,18 +136,21 @@ def bot_functions(*names, **context):
 
 
 def test_bot_move_uses_strict_apply_under_mutation_lock(monkeypatch):
+    import route_move_runtime
     calls, lock = [], threading.Lock()
     def move(a, b, **kwargs):
         assert lock.locked() and (a, b) == ('vless.txt', 'hysteria2.txt')
         kwargs['apply_changes']()
         return {'changed': True}
     monkeypatch.setattr(lists, 'move_unblock_list', move)
+    monkeypatch.setattr(route_move_runtime, 'run_update', lambda affected: calls.append(affected))
     ctx = bot_functions('_move_route_list', service_route_mutation_lock=lock,
+        os=os, time=time, _write_runtime_log=lambda text: None,
         _sync_proxy_route_policy_config=lambda **kw: calls.append(kw),
         subprocess=SimpleNamespace(DEVNULL=-3, run=lambda *args, **kw: calls.append(kw)),
         _web_route_tools_runtime=None, _invalidate_web_status_cache=lambda: None)
     assert ctx['_move_route_list']('vless.txt', 'hysteria2.txt') == {'changed': True}
-    assert calls[0] == {'strict': True} and calls[1]['check'] is True
+    assert calls[0] == {'strict': True} and set(calls[1].split()) == {'unblockvless', 'unblockhy2'}
 
 
 @pytest.mark.parametrize('raises', [False, True])
@@ -162,3 +166,29 @@ def test_strict_policy_sync_propagates_core_failure(raises):
     ctx['_sync_proxy_route_policy_config']()
     with pytest.raises(RuntimeError, match='Xray'):
         ctx['_sync_proxy_route_policy_config'](strict=True)
+
+
+def test_progress_get_is_read_only_and_duplicate_move_is_rejected():
+    import route_move_runtime
+    import web_get_actions
+    assert route_move_runtime.begin()
+    try:
+        route_move_runtime.phase('Обновление DNS и адресов')
+        result = web_get_actions.dispatch({}, '/api/route_move_status')
+        assert result['payload']['running'] and result['payload']['stage'] == 'Обновление DNS и адресов'
+        response = web_post_actions.dispatch({'move_route_list': lambda *a: pytest.fail('duplicate ran')},
+            '/route_list_move', {'source_list': ['vless.txt'], 'target_list': ['vmess.txt']})
+        assert not response['success'] and 'уже выполняется' in response['result']
+    finally:
+        route_move_runtime.finish()
+    assert not route_move_runtime.snapshot()['running']
+
+
+def test_unchanged_attested_route_config_does_not_restart():
+    ctx = bot_functions('_sync_proxy_route_policy_config', _sync_udp_policy_config=lambda **kw: None,
+        XRAY_STRICT_TRANSPARENT_PROTOCOLS=('vless',),
+        proxy_live_backend=SimpleNamespace(confirms_config=lambda config: config == {'same': True}),
+        _logical_proxy_config=lambda: {'same': True}, _write_runtime_log=lambda text: None,
+        _write_all_proxy_core_config=lambda: pytest.fail('unchanged config rewritten'),
+        _restart_core_proxy_after_validation=lambda: pytest.fail('unchanged core restarted'))
+    ctx['_sync_proxy_route_policy_config'](strict=True)

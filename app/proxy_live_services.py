@@ -21,7 +21,8 @@ SERVICE_PATHS = {
 def qualify_service_outbound(protocol, outbound):
     # The separate Trojan NAT service always uses TLS, even when a native Xray
     # outbound would support plaintext. Do not attest only the SOCKS half.
-    return protocol != 'trojan' or (outbound.get('streamSettings') or {}).get('security') == 'tls'
+    return (outbound.get('protocol') == 'blackhole' or protocol != 'trojan' or
+            (outbound.get('streamSettings') or {}).get('security') == 'tls')
 
 
 @lru_cache(maxsize=4)
@@ -39,6 +40,8 @@ def _trojan_default_config(executable, fingerprint):
 
 
 def encode_key(protocol, key, *, ports):
+    if not key.strip():
+        return b'{}\n' if protocol in SERVICE_PATHS else b''
     if protocol == 'shadowsocks':
         config = build_shadowsocks_config(key, ports[protocol])
     elif protocol == 'trojan':
@@ -88,16 +91,16 @@ def service_listener(protocol, port, *, proc_root='/proc'):
 
 
 def restart_service(protocol, port, *, run=subprocess.run, listening=service_listener,
-                    clock=time.monotonic, sleep=time.sleep):
+                    clock=time.monotonic, sleep=time.sleep, enabled=True):
     script, _, _ = SERVICE_PATHS[protocol]
     try:
-        result = run([script, 'restart'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        result = run([script, 'restart' if enabled else 'stop'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, timeout=20, check=False)
         if result.returncode != 0:
             return False
         deadline = clock() + 8
         while clock() < deadline:
-            if listening(protocol, port):
+            if bool(listening(protocol, port)) == bool(enabled):
                 return True
             sleep(.2)
     except (OSError, subprocess.SubprocessError):

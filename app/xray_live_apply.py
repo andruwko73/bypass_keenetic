@@ -257,6 +257,8 @@ def qualify_outbound(outbound):
     """
     stream = outbound.get('streamSettings') or {}
     protocol, security = outbound.get('protocol'), stream.get('security', 'none')
+    if protocol == 'blackhole':
+        return set(outbound).issubset({'tag', 'protocol'})
     if protocol == 'hysteria':
         mask = (stream.get('finalmask') or {}).get('udp', [])
         settings = outbound.get('settings') or {}
@@ -330,7 +332,9 @@ def switch_prepared_outbound(api, *, logical_tag, old_target, candidate, generat
         # complete generation tag. It cannot receive ordinary flows yet.
         api.select(balancer, new_target)
         checkpoint('selected', old_target, new_target)
-        if verify() is not True:
+        # Manual selection commits the requested route even while its server is
+        # offline. API readback and durable persistence remain mandatory.
+        if verify is not None and verify() is not True:
             raise LiveApplyError('Candidate data-plane verification failed')
         check()
         checkpoint('verified', old_target, new_target)
@@ -339,7 +343,7 @@ def switch_prepared_outbound(api, *, logical_tag, old_target, candidate, generat
     except PersistUncertain:
         checkpoint('recovery_required', old_target, new_target)
         raise LiveApplyError('Disk state is uncertain; explicit recovery is required') from None
-    except Exception:
+    except Exception as cause:
         # An API timeout can occur after a successful mutation. Read back the
         # actual target before deciding what can safely be reversed.
         try:
@@ -359,4 +363,4 @@ def switch_prepared_outbound(api, *, logical_tag, old_target, candidate, generat
         except Exception:
             checkpoint('recovery_required', old_target, new_target)
             raise LiveApplyError('Apply incomplete; explicit recovery is required') from None
-        raise LiveApplyError('Candidate was not applied; previous route restored') from None
+        raise LiveApplyError('Candidate was not applied; previous route restored') from cause
