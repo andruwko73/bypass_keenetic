@@ -107,3 +107,33 @@ def test_cleanup_is_only_after_runtime_and_network_success():
     success = source.index('write_cli_update_status update false 100', cleanup)
     assert start < network < cleanup < success
     assert 'cleanup_completed_update_artifacts' not in source[start:network]
+
+
+def test_update_post_restore_phase_does_not_repair_user_catalog(tmp_path):
+    """A missing catalog entry is also a valid deliberate user deletion."""
+    source = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    phase = source.split('    restore_runtime_state_files_after_update\n', 1)[1]
+    phase = phase.split('    mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"', 1)[0]
+    bash = shutil.which('bash')
+    if os.name == 'nt':
+        bash = r'C:\Program Files\Git\bin\bash.exe'
+    assert bash and Path(bash).is_file()
+    lists = {name: tmp_path / name for name in (
+        'vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt', 'hysteria2.txt',
+    )}
+    before = b'# Partial service and user addresses\nyoutube.com\ncustom.example\n192.0.2.0/24\n2001:db8::/32\n'
+    for path in lists.values():
+        path.write_bytes(before)
+    # These steps own config/UDP policy only. An implicit route repair is a
+    # regression regardless of whether the current catalog happens to match.
+    harness = '''set -eu
+ensure_hysteria2_runtime_state_files() { :; }
+ensure_runtime_legacy_paths() { :; }
+migrate_runtime_config_defaults() { :; }
+generate_udp_quic_policy_file() { :; }
+repair_service_route_catalog_drift() { exit 42; }
+''' + phase
+    result = subprocess.run([bash, '-s'], input=harness, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+    assert result.returncode == 0, result.stdout
+    assert all(path.read_bytes() == before for path in lists.values())

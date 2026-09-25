@@ -2029,25 +2029,6 @@ PYCFG
   grep -Eq '^xray_route_only_tproxy_protocols[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_route_only_tproxy_protocols = ()\n' >> "$BOT_CONFIG_PATH"
 }
 
-repair_service_route_catalog_drift() {
-  python_bin="/opt/bin/python3"
-  [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
-  [ -n "$python_bin" ] || return 0
-  PYTHONPATH="$BOT_RUNTIME_DIR" "$python_bin" - <<'PY' || true
-from service_routes import repair_service_route_catalog_drift as repair_drift
-
-result = repair_drift(update_script='')
-services = int(result.get('services') or 0)
-if services:
-    print(
-        'Service route catalog repaired: '
-        f'{services} service(s), '
-        f'{result.get("entries_added", 0)} added, '
-        f'{result.get("entries_removed", 0)} removed.'
-    )
-PY
-}
-
 generate_udp_quic_policy_file() {
   python_bin="/opt/bin/python3"
   [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
@@ -2699,7 +2680,8 @@ if [ "$1" = "-update" ]; then
     ensure_runtime_legacy_paths
     migrate_runtime_config_defaults
     generate_udp_quic_policy_file
-    repair_service_route_catalog_drift
+    # Lists are user state: a partial catalog can mean deliberately removed
+    # addresses. Only an explicit service action may fill the catalog again.
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"

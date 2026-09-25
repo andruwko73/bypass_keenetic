@@ -6320,9 +6320,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'def repair_service_route_catalog_drift(' in service_routes_source
     assert 'update_script=UNBLOCK_UPDATE_SCRIPT' in service_routes_source
     assert 'ensure_runtime_legacy_paths\n    generate_udp_quic_policy_file' in script
-    assert 'migrate_runtime_config_defaults\n    generate_udp_quic_policy_file\n    repair_service_route_catalog_drift' in script
-    assert 'Service route catalog repaired:' in script
-    assert script.count('repair_service_route_catalog_drift') == 3
+    assert 'migrate_runtime_config_defaults\n    generate_udp_quic_policy_file' in script
+    assert 'repair_service_route_catalog_drift' not in script
     assert bootstrap.count('repair_service_route_catalog_drift') == 0
 
     for script_path in (ROOT / 'script.sh', ROOT / 'bootstrap' / 'install.sh'):
