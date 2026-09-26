@@ -10683,7 +10683,7 @@ def test_failover_candidate_worker_command_uses_narrow_runner():
         root = Path(temp_dir)
         input_path = root / 'input.json'
         result_path = root / 'result.json'
-        input_path.write_text(json.dumps({'service': 'telegram', 'candidates': []}), encoding='utf-8')
+        input_path.write_text(json.dumps({'service': 'telegram', 'candidates': [], 'service_contracts': {}}), encoding='utf-8')
         assert failover_candidate_runner.run_failover_candidate_worker(str(input_path), str(result_path)) == 2
         result = json.loads(result_path.read_text(encoding='utf-8'))
         assert result['ok'] is False

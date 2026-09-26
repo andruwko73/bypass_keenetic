@@ -208,6 +208,9 @@ def find_pool_failover_candidate(
     youtube_quality_settings=None,
     youtube_profile='confirm',
     youtube_retry_unstable=True,
+    service_contracts=None,
+    check_custom=None,
+    deadline=None,
     validate_outbound=pool_probe_outbound,
     build_config_batch=build_pool_probe_core_config_batch,
     start_xray=start_pool_probe_xray,
@@ -229,6 +232,8 @@ def find_pool_failover_candidate(
     tg_connect, tg_read = telegram_timeouts
     http_connect, http_read = http_timeouts
     while probe_tasks:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         raw_batch = take_isolated_probe_batch(probe_tasks, batch_size)
         valid_batch = []
         for proto, key_value in raw_batch:
@@ -321,6 +326,24 @@ def find_pool_failover_candidate(
                     **record_kwargs,
                 )
                 if primary_ok:
+                    if service_contracts is not None:
+                        from failover_services import check_required, record_required, service_label
+                        contract = service_contracts.get(proto)
+                        if contract is None or check_custom is None:
+                            raise ValueError('Missing failover service contract')
+                        verdict, rejected, values = check_required(
+                            proxy_url, contract, primary=service,
+                            check_telegram=check_telegram_api, check_http=check_http,
+                            check_custom=check_custom, timeouts=(http_connect, http_read),
+                            deadline=deadline,
+                        )
+                        record_required(record_key_probe, proto, key_value, contract, values)
+                        if verdict is not True:
+                            import hashlib
+                            key_id = hashlib.sha1(key_value.encode()).hexdigest()[:12]
+                            log(f'Auto-failover: кандидат {proto}/{key_id} пропущен; сервис {service_label(rejected)}: '
+                                + ('проверка недоступна.' if verdict is None else 'не работает.'))
+                            continue
                     return proto, key_value, tg_ok, yt_ok
         except Exception as exc:
             log(f'Auto-failover: ошибка проверки кандидатов через временный xray: {exc}')

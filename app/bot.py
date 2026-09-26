@@ -1843,6 +1843,51 @@ def _confirm_telegram_failover_candidate(proto, _key_value):
     return False, neutral_message or 'neutral HTTPS confirmation failed'
 
 
+_failover_service_contracts = {}
+_failover_candidate_cursor = {}
+
+
+def _failover_service_log(message, service, proto=''):
+    _write_runtime_log(message)
+    _record_event('failover_service_check', message, source='watchdog', protocol=proto,
+                  service=service, details={'required_services': True})
+
+
+def _current_failover_service_contracts():
+    from failover_services import load_contracts
+    return load_contracts(_load_custom_checks(), telegram_proto=_telegram_route_protocol(),
+                          youtube_proto=_youtube_route_protocol())
+
+
+def _failover_candidate_still_valid(proto, key_value, service='telegram'):
+    try:
+        contract = _failover_service_contracts.get((service, proto))
+        current = _current_failover_service_contracts().get(proto)
+        return bool(contract and current and contract['revision'] == current['revision']
+                    and key_value in (_load_key_pools().get(proto) or []))
+    except Exception:
+        return False
+
+
+def _confirm_failover_services(proto, key_value, service, deadline=None):
+    if not _failover_candidate_still_valid(proto, key_value, service):
+        return None, 'Маршрут или состав пула изменился во время проверки.'
+    budget = max(0, deadline - time.time()) if deadline else 45
+    if budget < 1:
+        return None, 'Исчерпан бюджет проверки сервисов.'
+    result = _find_pool_failover_candidate_in_process(
+        [(proto, key_value)], service=service, timeout_seconds=budget,
+        service_contracts={proto: _failover_service_contracts[(service, proto)]},
+        confirmation_proxy=proxy_settings.get(proto),
+    )
+    if not _failover_candidate_still_valid(proto, key_value, service):
+        return None, 'Маршрут или состав пула изменился во время подтверждения.'
+    if result:
+        _failover_service_log('Обязательные сервисы маршрута подтверждены через рабочий прокси.', service, proto)
+    return (True, 'Обязательные сервисы маршрута подтверждены.') if result else (
+        None, 'Обязательные сервисы маршрута не подтверждены; прежний ключ восстанавливается.')
+
+
 def _attempt_auto_failover():
     telegram_route_proto = _telegram_route_protocol()
     if not telegram_route_proto:
@@ -1883,6 +1928,13 @@ def _attempt_auto_failover():
                 )
                 return False
 
+        service_deadline = time.time() + 120
+        def select_service_candidate(candidates, service='telegram'):
+            remaining = service_deadline - time.time() - 20
+            if remaining < 1:
+                return None
+            return _find_pool_failover_candidate(candidates, service=service,
+                                                  timeout_seconds=min(60, remaining))
         switched = _auto_failover_runtime().attempt_auto_failover(
             state=auto_failover_state,
             pool_probe_locked=lambda: bool(pool_probe_lock.locked()),
@@ -1892,7 +1944,7 @@ def _attempt_auto_failover():
             load_current_keys=_load_current_keys,
             load_key_pools=_load_key_pools,
             failover_candidates=_key_pool_store().failover_candidates,
-            find_pool_failover_candidate=_find_pool_failover_candidate,
+            find_pool_failover_candidate=select_service_candidate,
             install_key_for_protocol=_install_key_for_protocol,
             update_proxy=update_proxy,
             set_active_key=_set_active_key,
@@ -1915,6 +1967,8 @@ def _attempt_auto_failover():
             protocols=(telegram_route_proto,),
             defer_switch=_auto_failover_defer_switch_for_traffic_guard,
             confirm_candidate=_confirm_telegram_failover_candidate,
+            confirm_services=lambda proto, key: _confirm_failover_services(proto, key, 'telegram', service_deadline),
+            candidate_still_valid=_failover_candidate_still_valid,
             begin_switch_transaction=_begin_telegram_failover_transaction,
             update_switch_transaction=_update_telegram_failover_transaction,
             clear_switch_transaction=_clear_telegram_failover_transaction,
@@ -2975,6 +3029,9 @@ def _switch_youtube_to_verified_candidate(
                     state['active_key_id'] = _hash_key(latest_active_key) if latest_active_key else ''
                     state['deferred_reason'] = 'цикл остановлен после смены активного ключа'
                     return False
+                if not _failover_candidate_still_valid(route_proto, key_value, 'youtube'):
+                    state['deferred_reason'] = 'маршрут или пул изменился; кандидат требует новой проверки'
+                    return False
                 state['last_attempt'] = time.time()
                 if not _begin_youtube_failover_transaction(route_proto, original_key, key_value, trigger):
                     state['deferred_reason'] = 'не удалось сохранить безопасную точку переключения'
@@ -3112,6 +3169,18 @@ def _switch_youtube_to_verified_candidate(
                     )
                     continue
 
+            services_ok, services_message = _confirm_failover_services(
+                route_proto, key_value, 'youtube',
+                deadline=failure_deadline if trigger == 'failed' else None,
+            )
+            if services_ok is not True:
+                state['deferred_reason'] = services_message
+                if not _restore_youtube_key_after_failed_failover(
+                    route_proto, original_key, expected_current_key=key_value,
+                ):
+                    return False
+                _write_runtime_log(f'YouTube failover: {services_message}')
+                continue
             if not _update_youtube_failover_transaction('candidate_verified'):
                 state['deferred_reason'] = 'не удалось сохранить результат проверки запасного ключа'
                 _restore_youtube_key_after_failed_failover(
@@ -11759,6 +11828,8 @@ def _find_pool_failover_candidate_inline(
     http_timeouts=None,
     youtube_profile='confirm',
     youtube_retry_unstable=True,
+    service_contracts=None,
+    timeout_seconds=None,
 ):
     """Find one working pool key through a temporary xray before touching the active proxy."""
     http_timeouts = (
@@ -11777,11 +11848,14 @@ def _find_pool_failover_candidate_inline(
         check_http=_check_http_through_proxy,
         record_key_probe=_record_key_probe,
         proto_label=_pool_proto_label,
-        log=_write_runtime_log,
+        log=lambda message: _failover_service_log(message, service),
         telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
         http_timeouts=http_timeouts,
         youtube_profile=youtube_profile,
         youtube_retry_unstable=youtube_retry_unstable,
+        service_contracts=service_contracts,
+        check_custom=_check_custom_target_through_proxy,
+        deadline=time.monotonic() + max(1, min(120, float(timeout_seconds or 60))),
         youtube_quality_settings=(
             _youtube_quality_settings()
             if service == 'youtube' and measure_youtube_quality else None
@@ -12018,6 +12092,8 @@ def _find_pool_failover_candidate_in_process(
     youtube_profile='confirm',
     youtube_retry_unstable=True,
     timeout_seconds=None,
+    service_contracts=None,
+    confirmation_proxy=None,
 ):
     candidates = [
         (str(proto or ''), str(key_value or '').strip())
@@ -12033,6 +12109,9 @@ def _find_pool_failover_candidate_in_process(
     )
     payload = {
         'service': str(service or 'telegram'),
+        'service_contracts': service_contracts,
+        'confirmation_proxy': confirmation_proxy,
+        'budget_seconds': max(1, min(120, float(timeout_seconds or 60)) - 2),
         'candidates': candidates,
         'batch_size': POOL_PROBE_BATCH_SIZE,
         'test_port': POOL_FAILOVER_TEST_PORT,
@@ -12074,6 +12153,9 @@ def _find_pool_failover_candidate_in_process(
         worker_payload = _read_json_file(paths['result_path'], {}) or {}
         if not isinstance(worker_payload, dict):
             worker_payload = {}
+        for message in (worker_payload.get('events') or [])[:12]:
+            _failover_service_log(_redact_sensitive_text(message), service,
+                                  candidates[0][0] if candidates else '')
         if result.returncode not in (0, 2):
             error = str(worker_payload.get('error') or '').strip()
             if error:
@@ -12104,7 +12186,7 @@ def _find_pool_failover_candidate_in_process(
             payload['candidates'] = []
         except Exception:
             pass
-        if worker_timed_out:
+        if worker_timed_out and not confirmation_proxy:
             # A normal child owns and reaps its temporary Xray.  Scan only
             # after a timeout, when the interpreter could not reach cleanup.
             _cleanup_pool_probe_runtime_light(kill_processes=True)
@@ -12119,6 +12201,29 @@ def _find_pool_failover_candidate(
     youtube_retry_unstable=True,
     timeout_seconds=None,
 ):
+    from failover_services import MAX_CANDIDATES, recent_failure, service_label
+    contracts = _current_failover_service_contracts()
+    _failover_service_contracts.update({(service, proto): value for proto, value in contracts.items()})
+    cache = _load_key_probe_cache()
+    eligible = []
+    rejected_count = 0
+    for proto, key in candidates:
+        rejected = recent_failure(cache.get(_hash_key(key), {}), contracts[proto])
+        if rejected:
+            rejected_count += 1
+            if rejected_count <= 4:
+                _failover_service_log(f'Кандидат {_hash_key(key)[:12]} пропущен: свежий отказ {service_label(rejected)}.', service, proto)
+        else:
+            eligible.append((proto, key))
+    if rejected_count > 4:
+        _failover_service_log(f'Кандидатов со свежим отказом обязательных сервисов: {rejected_count}.', service)
+    cursor_key = (service, tuple(sorted({p for p, _key in eligible})))
+    offset = _failover_candidate_cursor.get(cursor_key, 0) % max(1, len(eligible))
+    candidates = (eligible[offset:] + eligible[:offset])[:MAX_CANDIDATES]
+    _failover_candidate_cursor[cursor_key] = offset + len(candidates)
+    if not candidates:
+        _failover_service_log('Нет ключей, подходящих для обязательных сервисов; текущий ключ сохранён.', service)
+        return None
     if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE:
         return _find_pool_failover_candidate_in_process(
             candidates,
@@ -12128,6 +12233,7 @@ def _find_pool_failover_candidate(
             youtube_profile=youtube_profile,
             youtube_retry_unstable=youtube_retry_unstable,
             timeout_seconds=timeout_seconds,
+            service_contracts=contracts,
         )
     return _find_pool_failover_candidate_inline(
         candidates,
@@ -12136,6 +12242,8 @@ def _find_pool_failover_candidate(
         http_timeouts=http_timeouts,
         youtube_profile=youtube_profile,
         youtube_retry_unstable=youtube_retry_unstable,
+        service_contracts=contracts,
+        timeout_seconds=timeout_seconds,
     )
 
 

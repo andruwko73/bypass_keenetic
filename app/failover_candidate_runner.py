@@ -4,12 +4,19 @@
 import json
 import os
 import sys
+import time
 
 from health_check_runner import _check_telegram, _redact, _status_value
 from pool_probe_runner import cleanup_pool_probe_runtime, find_pool_failover_candidate
 from probe_cache import record_key_probe
 from proxy_protocols import proxy_outbound_from_key
-from proxy_status import check_http_through_proxy, wait_for_socks5_handshake
+from proxy_status import check_http_through_proxy, wait_for_socks5_handshake, check_custom_target_through_proxy
+from custom_checks_store import normalize_check_url
+from failover_services import check_required, record_required, service_label
+
+
+def _check_custom(proxy_url, url, **kwargs):
+    return check_custom_target_through_proxy(normalize_check_url, proxy_url, url, **kwargs)
 
 
 def _read_json(path, default):
@@ -86,34 +93,59 @@ def run_failover_candidate_worker(input_path, result_path):
         'rss_before_kb': _status_value('VmRSS'),
         'rss_after_kb': 0,
         'hwm_kb': 0,
+        'events': [],
     }
     exit_code = 1
     try:
         telegram_timeouts = tuple(payload.get('telegram_timeouts') or (2, 3))
         http_timeouts = tuple(payload.get('http_timeouts') or (2, 3))
-        candidate = find_pool_failover_candidate(
-            _as_candidates(payload),
-            service=service,
-            batch_size=max(1, int(payload.get('batch_size') or 1)),
-            test_port=str(payload.get('test_port') or 10900),
-            proxy_outbound_from_key=proxy_outbound_from_key,
-            wait_for_socks5=wait_for_socks5_handshake,
-            check_telegram_api=_telegram_check(payload.get('telegram_authenticated')),
-            check_http=check_http_through_proxy,
-            record_key_probe=record_key_probe,
-            proto_label=lambda proto: str(proto or ''),
-            log=lambda _message: None,
-            telegram_timeouts=(float(telegram_timeouts[0]), float(telegram_timeouts[1])),
-            http_timeouts=(float(http_timeouts[0]), float(http_timeouts[1])),
-            youtube_profile=str(payload.get('youtube_profile') or 'confirm'),
-            youtube_retry_unstable=bool(payload.get('youtube_retry_unstable', True)),
-            youtube_quality_settings=(
-                dict(payload.get('youtube_quality_settings') or {})
-                if isinstance(payload.get('youtube_quality_settings'), dict)
-                else None
-            ),
-            collect_garbage=lambda: 0,
-        )
+        deadline = time.monotonic() + max(1, min(120, float(payload.get('budget_seconds') or 60)))
+        contracts = payload.get('service_contracts')
+        if not isinstance(contracts, dict):
+            raise ValueError('Missing failover service contracts')
+        def log(message):
+            if len(result['events']) < 12:
+                result['events'].append(_redact(message)[:200])
+        if payload.get('confirmation_proxy'):
+            proto, key_value = _as_candidates(payload)[0]
+            verdict, rejected, values = check_required(
+                payload['confirmation_proxy'], contracts[proto], primary=service,
+                check_telegram=_telegram_check(payload.get('telegram_authenticated')),
+                check_http=check_http_through_proxy, check_custom=_check_custom,
+                timeouts=http_timeouts, deadline=deadline,
+            )
+            record_required(record_key_probe, proto, key_value, contracts[proto], values, kind='runtime')
+            if verdict is not True:
+                log(f'Auto-failover: постоянная проверка сервиса {service_label(rejected)}: '
+                    + ('недоступна.' if verdict is None else 'неуспешна.'))
+            candidate = (proto, key_value, None, None) if verdict is True else None
+        else:
+            candidate = find_pool_failover_candidate(
+                _as_candidates(payload),
+                service=service,
+                batch_size=max(1, int(payload.get('batch_size') or 1)),
+                test_port=str(payload.get('test_port') or 10900),
+                proxy_outbound_from_key=proxy_outbound_from_key,
+                wait_for_socks5=wait_for_socks5_handshake,
+                check_telegram_api=_telegram_check(payload.get('telegram_authenticated')),
+                check_http=check_http_through_proxy,
+                record_key_probe=record_key_probe,
+                proto_label=lambda proto: str(proto or ''),
+                log=log,
+                telegram_timeouts=(float(telegram_timeouts[0]), float(telegram_timeouts[1])),
+                http_timeouts=(float(http_timeouts[0]), float(http_timeouts[1])),
+                youtube_profile=str(payload.get('youtube_profile') or 'confirm'),
+                youtube_retry_unstable=bool(payload.get('youtube_retry_unstable', True)),
+                youtube_quality_settings=(
+                    dict(payload.get('youtube_quality_settings') or {})
+                    if isinstance(payload.get('youtube_quality_settings'), dict)
+                    else None
+                ),
+                collect_garbage=lambda: 0,
+                service_contracts=contracts,
+                check_custom=_check_custom,
+                deadline=deadline,
+            )
         if candidate:
             proto, key_value, tg_ok, yt_ok = candidate
             result.update({'ok': True, 'candidate': [proto, key_value, tg_ok, yt_ok]})
@@ -123,7 +155,8 @@ def run_failover_candidate_worker(input_path, result_path):
     except Exception as exc:
         result['error'] = f'{type(exc).__name__}: {_redact(exc)}'
     finally:
-        cleanup_pool_probe_runtime(kill_processes=True)
+        if not payload.get('confirmation_proxy'):
+            cleanup_pool_probe_runtime(kill_processes=True)
         result['rss_after_kb'] = _status_value('VmRSS')
         result['hwm_kb'] = _status_value('VmHWM')
         try:

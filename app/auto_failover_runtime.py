@@ -104,6 +104,8 @@ def attempt_auto_failover(
     audit_key_switch=None,
     defer_switch=None,
     confirm_candidate=None,
+    confirm_services=None,
+    candidate_still_valid=None,
     begin_switch_transaction=None,
     update_switch_transaction=None,
     clear_switch_transaction=None,
@@ -416,6 +418,9 @@ def attempt_auto_failover(
                 break
 
             proto, key_value, tg_ok, yt_ok = candidate
+            if callable(candidate_still_valid) and not candidate_still_valid(proto, key_value):
+                log('Auto-failover: маршрут или пул изменился; устаревшее переключение отменено.')
+                return False
             attempted_candidates += 1
             remaining_candidates = [
                 item for item in remaining_candidates
@@ -481,6 +486,19 @@ def attempt_auto_failover(
                     return False
                 continue
 
+            if callable(confirm_services):
+                try:
+                    services_ok, services_message = confirm_services(proto, key_value)
+                except Exception:
+                    services_ok, services_message = None, 'Проверка сервисов недоступна; прежний ключ восстанавливается.'
+                if services_ok is not True:
+                    log(f'Auto-failover: {services_message}')
+                    if not restore_original_key():
+                        return False
+                    continue
+            if callable(candidate_still_valid) and not candidate_still_valid(proto, key_value):
+                restore_original_key()
+                return False
             if callable(update_switch_transaction) and not update_switch_transaction('candidate_verified'):
                 log('Auto-failover: candidate verification checkpoint could not be persisted; restoring previous key.')
                 restore_original_key()
@@ -510,7 +528,8 @@ def attempt_auto_failover(
             return True
 
         if not attempted_candidates:
-            log('Auto-failover: перебор ключей из пулов не дал доступа к Telegram API.')
+            state['last_attempt'] = time_provider()
+            log('Auto-failover: нет кандидата с подтверждёнными сервисами маршрута; текущий ключ сохранён.')
             return False
         if not restore_original_key():
             return False

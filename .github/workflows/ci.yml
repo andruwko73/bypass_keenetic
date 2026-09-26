@@ -61,6 +61,9 @@ jobs:
       - name: YouTube failover receive evidence
         run: python -m pytest tests/test_youtube_stream_evidence.py -q
 
+      - name: Route service failover admission
+        run: python -m pytest tests/test_failover_services.py -q
+
       - name: Secret scan
         run: python tests/secret_scan.py
 

@@ -724,11 +724,12 @@ def update_key_probe_cache_entry(
         for check_id, ok in (custom or {}).items():
             check_key = str(check_id)
             value = _stored_probe_value(ok)
+            previous_custom_ts = (entry.get('custom_times') or {}).get(check_key, entry.get('custom_ts') or 0)
             if (
                 not allow_recent_success_downgrade and
                 value is False and
-                previous_ts and
-                now - previous_ts < KEY_PROBE_SUCCESS_DOWNGRADE_GRACE and
+                previous_custom_ts and
+                now - previous_custom_ts < KEY_PROBE_SUCCESS_DOWNGRADE_GRACE and
                 existing_custom.get(check_key) is True
             ):
                 skipped_downgrade = True
@@ -737,6 +738,17 @@ def update_key_probe_cache_entry(
             if check_key not in existing_custom or existing_custom.get(check_key) is not value:
                 existing_custom[check_key] = value
                 changed = True
+            stamps = dict(entry.get('custom_times') or {})
+            stamps[check_key] = now
+            entry['custom_times'] = stamps
+            if custom_checks is not None:
+                from failover_services import check_signature
+                matching = next((item for item in custom_checks if item.get('id') == check_key), None)
+                if matching is not None:
+                    signatures = dict(entry.get('custom_signatures') or {})
+                    signatures[check_key] = check_signature(matching)
+                    entry['custom_signatures'] = signatures
+            changed = True
         if entry.get('custom') != existing_custom:
             entry['custom'] = existing_custom
             changed = True
