@@ -10650,7 +10650,8 @@ def _scheduled_checks_status():
     details = background_task_skip_details.get(name, {})
     progress = _get_pool_probe_progress()
     live_progress = (
-        (int(progress.get('checked') or 0), int(progress.get('total') or 0))
+        (int(progress.get('checked') or 0), int(progress.get('total') or 0),
+         float(progress.get('started_at') or 0))
         if progress.get('running') and progress.get('scope') == 'nightly_subscription' else None
     )
     signature = (tuple(stamps), reason, retry_at, tuple(sorted(details.items())), SUBSCRIPTION_AUTO_REFRESH_ENABLED, live_progress)
@@ -10659,8 +10660,17 @@ def _scheduled_checks_status():
     payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
     latest = payload.get('last_finished_run') or payload.get('latest_run') or {}
     nightly = _nightly_subscription_pool_probe_state()
-    if nightly.get('status') == 'running' and live_progress is not None:
-        nightly = dict(nightly, checked=live_progress[0], total=live_progress[1])
+    if live_progress is not None and nightly.get('status') in ('running', 'paused'):
+        persisted_start = float(nightly.get('started_at') or 0)
+        same_run = (persisted_start > 0 and live_progress[2] > 0
+                    and abs(persisted_start - live_progress[2]) < 1)
+        legacy_running = (nightly.get('status') == 'running'
+                          and not (persisted_start and live_progress[2]))
+        if same_run or legacy_running:
+            # A generic automatic resume can precede the next scheduler tick.
+            # Its live state takes priority over the saved pause, for this run only.
+            nightly = dict(nightly, status='running', checked=live_progress[0],
+                           total=live_progress[1], finished_at=0, next_retry_at=0, reason='')
     manual = payload.get('last_manual_run') or (latest if latest.get('scope') and latest.get('scope') != 'nightly_subscription' else {})
     automatic = payload.get('last_automatic_run') or (latest if latest.get('scope') == 'nightly_subscription' else {})
     if not automatic and nightly.get('status') == 'completed':

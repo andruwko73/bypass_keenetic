@@ -228,3 +228,34 @@ def test_public_nightly_progress_does_not_use_another_run(scheduler, tmp_path, s
                  _get_pool_probe_progress=lambda: dict(running=running, scope=scope, checked=9, total=10),
                  _load_subscription_state=lambda: {})
     assert '5 из 12' in s.env['_scheduled_checks_status']()['queue']
+
+
+def test_public_status_tracks_automatic_resume_before_scheduler_tick(scheduler, tmp_path):
+    s = scheduler
+    s.path.write_text(json.dumps({'schema': 3, 'status': 'paused', 'window_date': '2026-09-29',
+                                 'checked': 127, 'total': 139, 'started_at': s.clock[0],
+                                 'finished_at': s.clock[0]+3900, 'next_retry_at': s.clock[0]+4200,
+                                 'reason': 'Проверка приостановлена и может быть продолжена.'}))
+    progress = dict(running=True, scope='nightly_subscription', checked=133, total=139,
+                    started_at=s.clock[0]+.5)
+    s.env.update(os=os, _POOL_SUMMARY_LAST_PATH=str(tmp_path/'summary.json'), scheduled_checks_view_cache={},
+                 _get_pool_probe_progress=lambda: dict(progress), _load_subscription_state=lambda: {})
+    saved = s.path.read_bytes()
+    queue = s.env['_scheduled_checks_status']()['queue']
+    assert '133 из 139' in queue and 'приостановлена' not in queue and 'Следующая попытка' not in queue
+    # Same counters from another run must invalidate the cache and restore the saved pause.
+    progress['started_at'] -= 86400
+    assert '127 из 139' in s.env['_scheduled_checks_status']()['queue']
+    assert s.path.read_bytes() == saved
+
+
+@pytest.mark.parametrize('status', ['completed', 'failed', 'cancelled'])
+def test_live_progress_does_not_reopen_a_terminal_nightly_run(scheduler, tmp_path, status):
+    s = scheduler
+    s.path.write_text(json.dumps({'schema': 3, 'status': status, 'window_date': '2026-09-29',
+                                 'checked': 12, 'total': 12, 'started_at': s.clock[0]}))
+    s.env.update(os=os, _POOL_SUMMARY_LAST_PATH=str(tmp_path/'summary.json'), scheduled_checks_view_cache={},
+                 _get_pool_probe_progress=lambda: dict(running=True, scope='nightly_subscription',
+                                                      started_at=s.clock[0], checked=9, total=12),
+                 _load_subscription_state=lambda: {})
+    assert '9 из 12' not in s.env['_scheduled_checks_status']()['queue']
