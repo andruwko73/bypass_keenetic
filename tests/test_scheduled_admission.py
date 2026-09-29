@@ -1,6 +1,7 @@
 """Exercise production scheduler callers together with their real admission guard."""
 import ast
 import json
+import os
 import re
 import sys
 import threading
@@ -74,7 +75,8 @@ def scheduler(tmp_path):
              '_run_coordinated_background_task', '_run_subscription_auto_refresh_cycle', '_refresh_subscription_once',
              '_nightly_subscription_pool_probe_state', '_write_nightly_subscription_pool_probe_state',
              '_defer_nightly_subscription_pool_probe', '_mark_nightly_subscription_pool_probe_started',
-             '_mark_nightly_subscription_pool_probe_finished', '_maybe_start_nightly_subscription_pool_probe'}
+             '_mark_nightly_subscription_pool_probe_finished', '_maybe_start_nightly_subscription_pool_probe',
+             '_scheduled_checks_status'}
     for node in SOURCE.body:
         if isinstance(node, ast.FunctionDef) and node.name in names:
             exec(compile(ast.Module(body=[node], type_ignores=[]), '<production bot>', 'exec'), env)
@@ -195,3 +197,34 @@ def test_public_status_distinguishes_runs_and_deferral():
     assert 'Автоматическая проверка: ошибка' in lines['automatic']
     assert 'Доступно 100 МиБ' in lines['subscriptions']
     assert '300' in lines['queue']
+
+
+def test_public_running_progress_advances_without_state_file_write(scheduler, tmp_path):
+    s = scheduler
+    s.path.write_text(json.dumps({'schema': 3, 'status': 'running', 'window_date': '2026-09-29',
+                                 'checked': 0, 'total': 139, 'started_at': s.clock[0]}))
+    progress = {'running': True, 'scope': 'nightly_subscription', 'checked': 28, 'total': 139}
+    reads = []
+    s.env.update(os=os, _POOL_SUMMARY_LAST_PATH=str(tmp_path/'summary.json'), scheduled_checks_view_cache={},
+                 _get_pool_probe_progress=lambda: dict(progress),
+                 _load_subscription_state=lambda: reads.append(True) or {})
+    before = s.path.read_bytes()
+    lines = s.env['_scheduled_checks_status']()
+    assert '28 из 139' in lines['queue']
+    assert s.env['_scheduled_checks_status']() == lines and len(reads) == 1
+    progress['checked'] = 29
+    assert '29 из 139' in s.env['_scheduled_checks_status']()['queue']
+    assert len(reads) == 2 and s.path.read_bytes() == before
+
+
+@pytest.mark.parametrize('status,running,scope', [('running', True, 'protocol'),
+                                               ('running', False, 'nightly_subscription'),
+                                               ('paused', True, 'nightly_subscription')])
+def test_public_nightly_progress_does_not_use_another_run(scheduler, tmp_path, status, running, scope):
+    s = scheduler
+    s.path.write_text(json.dumps({'schema': 3, 'status': status, 'window_date': '2026-09-29',
+                                 'checked': 5, 'total': 12, 'started_at': s.clock[0]}))
+    s.env.update(os=os, _POOL_SUMMARY_LAST_PATH=str(tmp_path/'summary.json'), scheduled_checks_view_cache={},
+                 _get_pool_probe_progress=lambda: dict(running=running, scope=scope, checked=9, total=10),
+                 _load_subscription_state=lambda: {})
+    assert '5 из 12' in s.env['_scheduled_checks_status']()['queue']
