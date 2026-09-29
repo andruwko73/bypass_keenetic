@@ -311,6 +311,13 @@ def render_web_form(
     if enable_key_pool:
         pool_latest_run_text = str(pool_summary.get('latest_run_text') or '').strip()
         pool_latest_run_hidden = '' if pool_latest_run_text else ' hidden'
+        automation_status = pool_summary.get('automation_status') or {}
+        automation_html = ''.join(
+            f'<p class="status-note" id="pool-automation-{name}"'
+            + ('' if automation_status.get(name) else ' hidden')
+            + f'>{html.escape(str(automation_status.get(name) or ""))}</p>'
+            for name in ('subscriptions', 'manual', 'automatic', 'queue')
+        )
         key_pool_status_card = f'''
                         <div class="status-card key-pool-card">
                             <div class="status-card-top">
@@ -320,6 +327,7 @@ def render_web_form(
                                     <span class="status-value" id="pool-active-summary">{html.escape(pool_summary['active_text'])}</span>
                                     <p class="status-note" id="pool-summary-note">{html.escape(pool_summary_note)}</p>
                                     <p class="status-note" id="pool-latest-run-summary"{pool_latest_run_hidden}>{html.escape(pool_latest_run_text)}</p>
+                                    {automation_html}
                                     </div>
                                 </div>
                             <div class="status-card-actions key-pool-actions">

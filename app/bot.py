@@ -120,6 +120,8 @@ else:
     subscription_runtime = None
 import router_health_runtime
 import router_metrics
+import background_policy
+import runtime_logging
 try:
     import xray_compat_runtime
 except Exception:
@@ -1350,6 +1352,8 @@ udp_quic_drift_state = {
 background_task_skip_log_at = {}
 background_task_skip_until = {}
 background_task_skip_reason = {}
+background_task_skip_details = {}
+scheduled_checks_view_cache = {}
 background_task_coordinator_lock = threading.Lock()
 background_task_coordinator_state = {'name': '', 'started_at': 0.0}
 background_maintenance_thread = None
@@ -4360,14 +4364,9 @@ def _telegram_info_text_from_readme():
 
 
 def _write_runtime_log(message, mode='a'):
-    text = '' if message is None else str(message)
-    if text and not text.endswith('\n'):
-        text += '\n'
     for log_path in RUNTIME_ERROR_LOG_PATHS:
         try:
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, mode, encoding='utf-8', errors='ignore') as file:
-                file.write(text)
+            runtime_logging.append_log(log_path, message, mode=mode)
         except Exception:
             continue
 
@@ -6262,6 +6261,7 @@ def _background_task_allowed(
     bypass_backoff=False,
 ):
     if _update_maintenance_active():
+        background_task_skip_reason[task_name] = 'maintenance'
         return False
     now = time.time()
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
@@ -6286,13 +6286,27 @@ def _background_task_allowed(
         if max_cpu_percent is None else
         max(0.0, float(max_cpu_percent))
     )
+    # Only these scheduled tasks migrate their known historical RSS defaults.
+    # Other callers and explicit custom RSS limits retain their old semantics.
+    scheduled_task = task_name in (
+        'status refresh', 'Subscription auto refresh', 'Nightly subscription pool probe',
+    )
+    required_available_kb = 0
+    if scheduled_task:
+        bot_hard_limit_kb, program_limit_kb, required_available_kb = background_policy.admission_limits(
+            task_name, bot_hard_limit_kb, program_limit_kb,
+            policy=str(getattr(config, 'scheduled_task_memory_policy', 'available')),
+            minimum_available_kb=(
+                SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB if task_name != 'status refresh' else 0
+            ),
+        )
     can_bypass_rss_skip = (
         (
             skip_reason == 'rss' and
-            (ignore_bot_rss or bot_hard_limit_kb > default_bot_hard_limit_kb)
+            (ignore_bot_rss or bot_hard_limit_kb == 0 or bot_hard_limit_kb > default_bot_hard_limit_kb)
         ) or (
             skip_reason == 'program_rss' and
-            (allow_high_rss or program_limit_kb > default_program_limit_kb)
+            (allow_high_rss or program_limit_kb == 0 or program_limit_kb > default_program_limit_kb)
         )
     )
     if skip_until and now < skip_until and not (can_bypass_rss_skip or bypass_backoff):
@@ -6311,6 +6325,30 @@ def _background_task_allowed(
             return False
     except Exception:
         pass
+    if scheduled_task:
+        available_kb = int(_mem_available_kb_light() or 0)
+        details = {
+            'available_kb': available_kb,
+            'required_available_kb': required_available_kb,
+        }
+        background_task_skip_details[task_name] = details
+        reason = ''
+        if available_kb <= 0:
+            reason = 'memory_unknown'
+        elif available_kb < required_available_kb:
+            reason = 'memory'
+        elif task_name != 'status refresh':
+            load1 = _pool_probe_load_average()
+            if SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1 > 0 and load1 is not None and load1 > SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1:
+                reason = 'load'
+        if reason:
+            background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+            background_task_skip_reason[task_name] = reason
+            last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
+            if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+                background_task_skip_log_at[task_name] = now
+                _write_runtime_log(f'{task_name}: {background_policy.deferral_text(reason, details)}')
+            return False
     rss_kb = int(_process_rss_kb() or 0)
     program_rss_kb = int(_program_rss_kb() or rss_kb)
     if program_limit_kb > 0 and program_rss_kb >= program_limit_kb:
@@ -10593,7 +10631,44 @@ def _pool_summary_with_latest_run(summary, latest_run=None, current_run=None):
     # now always means the last terminal run, never the newly started run.
     result['latest_run'] = latest_run
     result['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
+    result['automation_status'] = _scheduled_checks_status()
     return result
+
+
+def _scheduled_checks_status():
+    paths = (SUBSCRIPTION_STATE_PATH, SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH, _POOL_SUMMARY_LAST_PATH)
+    stamps = []
+    for path in paths:
+        try:
+            info = os.stat(path)
+            stamps.append((info.st_mtime_ns, info.st_size))
+        except (OSError, TypeError):
+            stamps.append(None)
+    name = 'Subscription auto refresh'
+    reason = str(background_task_skip_reason.get(name) or '')
+    retry_at = background_task_skip_until.get(name, 0)
+    details = background_task_skip_details.get(name, {})
+    signature = (tuple(stamps), reason, retry_at, tuple(sorted(details.items())), SUBSCRIPTION_AUTO_REFRESH_ENABLED)
+    if scheduled_checks_view_cache.get('signature') == signature:
+        return dict(scheduled_checks_view_cache['lines'])
+    payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
+    latest = payload.get('last_finished_run') or payload.get('latest_run') or {}
+    nightly = _nightly_subscription_pool_probe_state()
+    manual = payload.get('last_manual_run') or (latest if latest.get('scope') and latest.get('scope') != 'nightly_subscription' else {})
+    automatic = payload.get('last_automatic_run') or (latest if latest.get('scope') == 'nightly_subscription' else {})
+    if not automatic and nightly.get('status') == 'completed':
+        automatic = nightly
+    records = [
+        {'last_attempt_at': r.get('last_attempt_at'), 'last_success_at': r.get('last_success_at')}
+        for _proto, r in _subscription_runtime().iter_subscription_records(_load_subscription_state())
+    ]
+    lines = background_policy.status_lines(
+        nightly, manual, automatic, records,
+        time_text=lambda stamp: time.strftime('%d.%m %H:%M', time.localtime(float(stamp))),
+        enabled=SUBSCRIPTION_AUTO_REFRESH_ENABLED, reason=reason, details=details, retry_at=retry_at,
+    )
+    scheduled_checks_view_cache.update(signature=signature, lines=lines)
+    return dict(lines)
 
 
 def _save_persisted_pool_probe_run(latest_run):
@@ -10633,6 +10708,8 @@ def _save_persisted_pool_probe_run(latest_run):
             payload.pop('current_run', None)
             payload['last_finished_run'] = normalized
             payload['latest_run'] = normalized
+            kind = 'last_automatic_run' if normalized['scope'] == 'nightly_subscription' else 'last_manual_run'
+            payload[kind] = normalized
         _write_json_file(_POOL_SUMMARY_LAST_PATH, payload)
         return normalized
 
@@ -13995,6 +14072,11 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
         })
         _write_nightly_subscription_pool_probe_state(interrupted)
         return False
+    if unfinished_stored_run and due_date and due_date > stored_window_date:
+        # Coalesce missed days into the current due run, retaining resumable work.
+        state = dict(state, window_date=due_date)
+        _write_nightly_subscription_pool_probe_state(state)
+        window_date = due_date
     if same_window:
         try:
             next_retry_at = float(state.get('next_retry_at') or 0)
@@ -14025,12 +14107,9 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
         max_cpu_percent=SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT,
     ):
         guard_reason = str(background_task_skip_reason.get(task_name) or 'busy')
-        reason = {
-            'rss': 'Ожидание снижения RSS Telegram-бота.',
-            'program_rss': 'Ожидание снижения общего RSS программы.',
-            'cpu': 'Ожидание снижения нагрузки CPU роутера.',
-            'busy': 'Ожидание завершения другой операции.',
-        }.get(guard_reason, 'Ожидание безопасного состояния роутера.')
+        reason = background_policy.deferral_text(
+            guard_reason, background_task_skip_details.get(task_name),
+        )
         _defer_nightly_subscription_pool_probe(window_date, now, reason)
         return False
     if pool_probe_lock.locked():
@@ -14126,6 +14205,7 @@ def _run_subscription_auto_refresh_cycle():
 
 def _background_maintenance_tasks():
     tasks = [('router CPU sample', 5.0, 0.0, router_health.sample_cpu)]
+    tasks.append(('runtime log retention', 60.0, 15.0, runtime_logging.trim_logs))
     if MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH:
         _record_memory_timeline('startup', marker='startup', force=True)
         tasks.append(('memory timeline', MEMORY_TIMELINE_INTERVAL_SECONDS, MEMORY_TIMELINE_INTERVAL_SECONDS, _run_memory_timeline_cycle))
@@ -14293,6 +14373,8 @@ def _web_pools_light_payload(current_keys, key_pools, protocols=None, include_su
 
 
 def _overlay_live_pool_status(payload):
+    if isinstance(payload, dict) and isinstance(payload.get('pool_summary'), dict):
+        payload['pool_summary']['automation_status'] = _scheduled_checks_status()
     route_proto = _telegram_route_protocol()
     if isinstance(payload, dict) and _app_mode_telegram_enabled() and bot_ready and bot_polling and route_proto:
         _key_pool_web().overlay_active_service_states(

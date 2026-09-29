@@ -3240,6 +3240,7 @@ def test_automatic_subscription_refresh_preserves_small_pool_on_repeated_shrink(
             "import bot\n"
             "old_keys = [f'vless://old-{i}@example.com:443' for i in range(2)]\n"
             "new_keys = old_keys[:1]\n"
+            "bot._subscription_auto_refresh_allowed = lambda _proto: True\n"
             "updates = []\n"
             "logs = []\n"
             "bot._fetch_keys_from_subscription = lambda *_args, **_kwargs: ({'vless': new_keys}, '')\n"

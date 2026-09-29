@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.1073
+# ВЕРСИЯ СКРИПТА v1.1074
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -24,8 +24,9 @@ subscription_auto_refresh_enabled = True
 subscription_auto_refresh_interval_seconds = 21600  # четыре раза в день для подписок с включенным HWID
 subscription_auto_refresh_retry_seconds = 3600
 subscription_auto_refresh_check_seconds = 300  # быстро повторить отложенную guard'ом просроченную подписку
-subscription_auto_refresh_max_bot_rss_kb = 81920  # лёгкое обновление подписки допускается выше общего фонового порога, но ниже watchdog
-subscription_auto_refresh_max_program_rss_kb = 112640  # общий RSS бота и Xray; не меняет лимиты других фоновых задач
+scheduled_task_memory_policy = 'available'  # запас свободной ОЗУ; 'rss' сохраняет прежние жёсткие пределы
+subscription_auto_refresh_max_bot_rss_kb = 81920  # старый стандартный предел заменён бюджетом ОЗУ; нестандартное значение остаётся ограничением
+subscription_auto_refresh_max_program_rss_kb = 112640  # аналогично; параметры сохраняются для совместимости отката
 subscription_auto_refresh_min_available_kb = 92160
 subscription_auto_refresh_max_cpu_percent = 80.0
 subscription_auto_refresh_max_load1 = 2.5

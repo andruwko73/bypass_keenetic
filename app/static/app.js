@@ -2659,6 +2659,14 @@
                 latestRunElement.textContent = latestRunText;
                 latestRunElement.hidden = !latestRunText;
             }
+            ['subscriptions', 'manual', 'automatic', 'queue'].forEach(function(name) {
+                const element = document.getElementById('pool-automation-' + name);
+                if (element) {
+                    const text = String((poolSummary.automation_status || {})[name] || '').trim();
+                    element.textContent = text;
+                    element.hidden = !text;
+                }
+            });
         }
 
         function updatePoolProbeControls(active, paused) {

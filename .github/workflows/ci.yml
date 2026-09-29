@@ -64,6 +64,9 @@ jobs:
       - name: Route service failover admission
         run: python -m pytest tests/test_failover_services.py -q
 
+      - name: Scheduled admission and bounded runtime logs
+        run: python -m pytest tests/test_scheduled_admission.py tests/test_runtime_logging.py -q
+
       - name: Secret scan
         run: python tests/secret_scan.py
 
@@ -120,3 +123,4 @@ jobs:
           BYPASS_UI_URL=http://127.0.0.1:18765/ npm run ui:smoke
           npm run ui:diagnostics
           npm run ui:quality
+          node tests/run_ui_smoke_fixture.js scheduler
