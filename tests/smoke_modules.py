@@ -8531,6 +8531,16 @@ def test_runtime_modules_are_installed_by_update_scripts():
     script_modules = set(re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', script).group(1).split())
     bootstrap_modules = set(re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', bootstrap).group(1).split())
     assert script_modules == bootstrap_modules
+    required_local_modules = set()
+    for path in APP_ROOT.glob('*.py'):
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            names = ([node.module] if isinstance(node, ast.ImportFrom) else
+                     [item.name for item in node.names] if isinstance(node, ast.Import) else [])
+            for name in names:
+                local_name = str(name or '').split('.')[0] + '.py'
+                if (APP_ROOT / local_name).is_file() and local_name not in ('bot.py', 'installer.py'):
+                    required_local_modules.add(local_name)
+    assert required_local_modules <= script_modules, sorted(required_local_modules - script_modules)
     assert {'repo_update.py', 'web_command_state.py', 'update_status.py'} <= script_modules
     assert 'update_worker.py' not in script_modules
     assert not (APP_ROOT / 'update_worker.py').exists()

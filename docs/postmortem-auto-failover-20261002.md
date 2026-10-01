@@ -40,6 +40,11 @@ rollback и сохранённым starttime. Производственный a
 
 Review prompts синхронизированы: реальные metric boundaries, исходный trigger,
 completion boundary, terminal chronology, media attribution и maintenance expiry.
+Перед аппаратным обновлением обнаружено, что новый module отсутствует в статических
+списках updater/bootstrap. Локальный полный набор проверял рабочее дерево; import
+некоторых runtime-зависимостей откладывается до операции и не проверял полноту пакета.
+Исправление 1.1078 включает module в оба списка и сопоставляет локальные AST imports
+со списками поставки. 1.1077 на рабочий роутер не устанавливалась.
 Проверку штатного GitHub update→rollback→update, расписания и ресурсов выполнять
 после зелёного CI точного опубликованного SHA; рабочий роутер не переустанавливать.
 До аппаратной первичной приёмки installer сохраняет owner-confirmed/validated=no.
