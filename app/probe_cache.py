@@ -499,6 +499,8 @@ def update_key_probe_cache_entry(
     yt_quality=None,
     yt_stream_tier=None,
     quality_error='',
+    yt_quality_error='',
+    yt_endpoint_results=None,
     stable_latency_ms=YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS,
     fast_latency_ms=YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS,
     min_1600p_mbps=YOUTUBE_QUALITY_DEFAULT_1600P_MBPS,
@@ -506,6 +508,8 @@ def update_key_probe_cache_entry(
     allow_recent_success_downgrade=False,
     verification_kind=PROBE_VERIFICATION_RUNTIME,
 ):
+    # Accept records queued by older workers; persist only the canonical name.
+    quality_error = quality_error or yt_quality_error
     cache = cache if isinstance(cache, dict) else {}
     key_id = str(key_id or hash_key(key_value))
     entry = cache.get(key_id, {})
@@ -519,6 +523,20 @@ def update_key_probe_cache_entry(
     if previous_ts and now < previous_ts:
         return False
     changed = False
+    if isinstance(yt_endpoint_results, list):
+        points = []
+        for point in yt_endpoint_results[:16]:
+            if not isinstance(point, dict):
+                continue
+            kind = str(point.get('kind') or '')
+            if kind not in ('primary', 'home', 'watch', 'short', 'bootstrap', 'googlevideo', 'other'):
+                continue
+            points.append({'kind': kind, 'ok': point.get('ok') is True,
+                           'latency_ms': max(0, min(600000, _stored_int(point.get('latency_ms')) or 0)),
+                           'error': point.get('error') if point.get('error') in ('', 'unstable', 'unreachable') else 'unreachable'})
+        if entry.get('yt_endpoint_results') != points:
+            entry['yt_endpoint_results'] = points
+            changed = True
     skipped_downgrade = False
     telegram_update_applied = False
     telegram_state_changed = False
@@ -626,7 +644,7 @@ def update_key_probe_cache_entry(
                     changed = True
         if yt_stability is not None:
             stability_value = str(yt_stability or '').strip().lower()
-            if stability_value not in ('stable', 'unstable', 'fail'):
+            if stability_value not in ('stable', 'unstable', 'partial', 'fail'):
                 stability_value = ''
             if entry.get('yt_stability', '') != stability_value:
                 if stability_value:

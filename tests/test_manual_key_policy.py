@@ -118,8 +118,9 @@ def test_delete_does_not_healthcheck_and_failed_local_apply_keeps_pool(proto, op
     events = []
     def save(path, pools):
         saved.clear(); saved.update(deepcopy(pools))
-    def install(p, k, *, verify, require_health):
+    def install(p, k, *, verify, require_health, automatic):
         assert verify is False and require_health is False
+        assert automatic is False
         if operation == 'local_failure':
             raise OSError('synthetic disk failure')
         events.append(('install', p, k))

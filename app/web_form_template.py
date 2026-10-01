@@ -316,7 +316,7 @@ def render_web_form(
             f'<p class="status-note" id="pool-automation-{name}"'
             + ('' if automation_status.get(name) else ' hidden')
             + f'>{html.escape(str(automation_status.get(name) or ""))}</p>'
-            for name in ('subscriptions', 'manual', 'automatic', 'queue')
+            for name in ('subscriptions', 'queue')
         )
         key_pool_status_card = f'''
                         <div class="status-card key-pool-card">

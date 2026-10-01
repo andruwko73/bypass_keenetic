@@ -5,6 +5,33 @@ only show enough incoming traffic to justify a short, reversible deferral.
 Outgoing retries, TCP acknowledgements and old cumulative totals do not.
 """
 import re
+import ipaddress
+
+
+def media_addresses(cache, *, now, ttl_seconds=900):
+    """Only recent identified googlevideo edges can support a media hold.
+
+    A shared proxy port and received route bytes alone do not identify media.
+    Even this evidence justifies a bounded hold, never a claim of playback.
+    """
+    entries = cache.get('entries') if isinstance(cache, dict) else {}
+    result = set()
+    if not isinstance(entries, dict):
+        return result
+    for address, entry in list(entries.items())[:2048]:
+        if not isinstance(entry, dict):
+            continue
+        host = str(entry.get('host') or '').lower()
+        if not re.fullmatch(r'r\d+---sn-[a-z0-9-]+\.googlevideo\.com', host):
+            continue
+        try:
+            age = float(now) - float(entry.get('last_seen') or 0)
+            normalized = str(ipaddress.ip_address(address))
+        except (ValueError, TypeError):
+            continue
+        if 0 <= age <= ttl_seconds:
+            result.add(normalized)
+    return result
 
 
 def reply_counters(line):

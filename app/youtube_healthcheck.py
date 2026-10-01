@@ -39,7 +39,7 @@ YOUTUBE_HEALTHCHECK_CONFIRM_URLS = (
     YOUTUBE_GOOGLEVIDEO_URL,
 )
 YOUTUBE_HEALTHCHECK_PROFILES = {
-    'emergency': ((YOUTUBE_PRIMARY_URL,), 1, 0),
+    'emergency': (YOUTUBE_HEALTHCHECK_PULSE_URLS, 3, 0),
     'pulse': (YOUTUBE_HEALTHCHECK_PULSE_URLS, 3, 0),
     'quick': (YOUTUBE_HEALTHCHECK_QUICK_URLS, 4, 0),
     'confirm': (YOUTUBE_HEALTHCHECK_CONFIRM_URLS, 5, 0),
@@ -135,6 +135,8 @@ def youtube_health_state(
     stability = str(metrics.get('yt_stability') or '').strip().lower()
     if ok is None:
         return 'unknown', 'результат проверки недоступен'
+    if stability == 'partial':
+        return 'partial', 'часть контрольных адресов YouTube не отвечает; полный отказ маршрута не подтверждён'
     if ok is False or stability == 'fail':
         return 'failed', 'обязательные адреса YouTube не отвечают'
 
@@ -209,6 +211,7 @@ def check_youtube_through_proxy(
     unstable_failures = 0
     last_error = ''
     first_home_ms = None
+    endpoint_results = []
 
     for index, url in enumerate(urls):
         kind = youtube_url_kind(url)
@@ -241,6 +244,8 @@ def check_youtube_through_proxy(
             if ok and youtube_http_status_is_denied(message):
                 ok = False
         elapsed_ms = _elapsed_ms(started_at)
+        endpoint_results.append({'kind': kind, 'ok': bool(ok), 'latency_ms': elapsed_ms,
+                                 'error': '' if ok else ('unstable' if youtube_error_is_unstable(message) else 'unreachable')})
         if kind == 'home' and first_home_ms is None:
             first_home_ms = elapsed_ms
         if ok:
@@ -315,7 +320,7 @@ def check_youtube_through_proxy(
         short_ok and
         googlevideo_ok_for_service
     )
-    stability = 'stable' if stable else ('unstable' if partially_ok else 'fail')
+    stability = 'stable' if stable else ('unstable' if partially_ok else ('partial' if ok_count else 'fail'))
 
     if metrics is not None:
         metrics['yt_home_ok'] = home_ok
@@ -325,6 +330,7 @@ def check_youtube_through_proxy(
         metrics['googlevideo_ok'] = googlevideo_ok
         metrics['yt_error_rate'] = round(float(failure_count) / float(total_count), 3)
         metrics['yt_stability'] = stability
+        metrics['yt_endpoint_results'] = endpoint_results[:16]
         if last_error:
             metrics['yt_last_error'] = last_error
         if first_home_ms is not None and 'yt_first_load_ms' not in metrics:

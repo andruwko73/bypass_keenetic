@@ -109,6 +109,7 @@ def attempt_auto_failover(
     begin_switch_transaction=None,
     update_switch_transaction=None,
     clear_switch_transaction=None,
+    restore_key_for_protocol=None,
     max_runtime_candidates=3,
     time_provider=time.time,
 ):
@@ -360,7 +361,8 @@ def attempt_auto_failover(
 
         def restore_original_key():
             try:
-                install_key_for_protocol(proxy_mode, active_key, verify=False)
+                restore = restore_key_for_protocol or install_key_for_protocol
+                restore(proxy_mode, active_key, verify=False)
                 restore_result = update_proxy(proxy_mode)
                 if isinstance(restore_result, tuple) and restore_result and restore_result[0] is False:
                     raise RuntimeError(str(restore_result[1] or 'failed to restore previous proxy'))
@@ -436,6 +438,15 @@ def attempt_auto_failover(
             try:
                 result = install_key_for_protocol(proto, key_value, verify=False)
             except Exception as exc:
+                from proxy_apply_result import AutomaticApplyBlocked
+                if isinstance(exc, AutomaticApplyBlocked):
+                    if callable(clear_switch_transaction):
+                        clear_switch_transaction()
+                    state['last_attempt'] = time_provider()
+                    state['deferred_reason'] = str(exc)
+                    _clear_forced_recovery(state)
+                    log(f'Auto-failover: {exc}')
+                    return False
                 record_key_probe(
                     proto,
                     key_value,
@@ -504,17 +515,6 @@ def attempt_auto_failover(
                 restore_original_key()
                 return False
             set_active_key(proto, key_value)
-            if callable(clear_switch_transaction):
-                clear_switch_transaction()
-            if callable(audit_key_switch):
-                audit_key_switch('telegram_auto_failover', proto, key_value, failure_message)
-            record_key_probe(
-                proto,
-                key_value,
-                tg_ok=True,
-                yt_ok=yt_ok,
-                verification_kind='runtime',
-            )
             switched_at = time_provider()
             state['last_ok'] = switched_at
             state['last_fail'] = 0.0
@@ -522,6 +522,14 @@ def attempt_auto_failover(
             state['last_failure_message'] = ''
             state['last_attempt'] = switched_at
             _clear_forced_recovery(state)
+            try:
+                if callable(clear_switch_transaction):
+                    clear_switch_transaction()
+                if callable(audit_key_switch):
+                    audit_key_switch('telegram_auto_failover', proto, key_value, failure_message)
+                record_key_probe(proto, key_value, tg_ok=True, yt_ok=yt_ok, verification_kind='runtime')
+            except Exception as exc:
+                log(f'Auto-failover: committed; bookkeeping deferred ({type(exc).__name__}).')
             log(
                 f'Auto-failover: переключено на {proto}; Telegram API подтверждён через рабочий Xray. {result}'
             )

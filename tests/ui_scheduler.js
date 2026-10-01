@@ -13,7 +13,7 @@ const {chromium} = require('playwright');
         url.searchParams.set('mode', mode);
         await page.goto(url.href, {waitUntil:'networkidle'});
         if (mode !== 'simple') {
-          for (const [name,label] of Object.entries({subscriptions:'Подписки:',manual:'Ручная проверка:',automatic:'Автоматическая проверка:',queue:'Следующая попытка'})) {
+          for (const [name,label] of Object.entries({subscriptions:'Подписки:',queue:'Следующая попытка'})) {
             const line = page.locator('#pool-automation-' + name);
             await line.scrollIntoViewIfNeeded();
             assert.ok(await line.isVisible());
@@ -21,6 +21,10 @@ const {chromium} = require('playwright');
             const bounds = await line.boundingBox();
             assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= viewport.width + 1);
           }
+          const last = page.locator('#pool-latest-run-summary');
+          assert.match(await last.innerText(), /^Последняя проверка: завершена · 29\.09 03:30\./);
+          assert.equal(await page.locator('#pool-automation-manual, #pool-automation-automatic').count(), 0);
+          assert.equal((await page.locator('.key-pool-card').innerText()).split('Последняя проверка:').length - 1, 1);
           const button = page.locator('.key-pool-card [data-pool-probe-start-button]');
           await button.scrollIntoViewIfNeeded();
           assert.ok(await button.isVisible());

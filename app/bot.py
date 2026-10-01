@@ -569,7 +569,15 @@ def _load_key_probe_cache(*args, **kwargs):
 
 
 def _record_key_probe(*args, **kwargs):
-    changed = _probe_cache().record_key_probe(*args, **kwargs)
+    try:
+        changed = _probe_cache().record_key_probe(*args, **kwargs)
+    except Exception as exc:
+        # Telemetry must not abort a confirmed route commit or its next cycle.
+        now = time.monotonic()
+        if now - globals().get('_probe_record_error_logged_at', -300.0) >= 300.0:
+            globals()['_probe_record_error_logged_at'] = now
+            _write_runtime_log(f'Probe telemetry deferred: {type(exc).__name__}')
+        return False
     if changed:
         try:
             _invalidate_pool_data_cache()
@@ -999,6 +1007,9 @@ def _telegram_route_failure_is_hard(proto):
 
 
 def _mark_active_telegram_failure(message, *, hard_failure=None):
+    maintenance = globals().get('_key_apply_maintenance_active')
+    if callable(maintenance) and maintenance():
+        return False
     now = time.time()
     telegram_route_proto = _telegram_route_protocol() or proxy_mode
     active_key = (
@@ -1579,14 +1590,18 @@ def _set_active_key(proto, key):
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
 
 
-def _install_key_for_protocol(proto, key_value, verify=True, *, require_health=True):
+def _install_key_for_protocol(proto, key_value, verify=True, *, require_health=True, automatic=True):
+    from proxy_apply_result import AutomaticApplyBlocked, requires_common_restart
     started_at = time.time()
     try:
         live_apply = globals().get('_try_live_key_apply')
         if callable(live_apply):
-            live_result = live_apply(proto, key_value, require_health=require_health)
-            if live_result is not None:
+            live_result = live_apply(proto, key_value, require_health=require_health, automatic=automatic)
+            if not requires_common_restart(live_result):
                 return live_result
+        if automatic:
+            raise AutomaticApplyBlocked('Автоматическая смена отложена: для этого транспорта нужен общий перезапуск Xray. '
+                                        'Текущий маршрут сохранён; ключ можно применить вручную.')
         installer = PROXY_KEY_INSTALLERS.get(proto)
         if installer is None:
             raise ValueError(f'Unsupported protocol: {proto}')
@@ -1597,6 +1612,17 @@ def _install_key_for_protocol(proto, key_value, verify=True, *, require_health=T
         _write_runtime_log(f'Key apply: protocol={proto} verify={int(bool(verify))} duration_ms={duration_ms}')
 
 
+def _automatic_hot_candidates(candidates):
+    from proxy_apply_result import ApplyRequirement
+    backend = globals().get('proxy_live_backend')
+    if backend is None:
+        return []
+    current = _logical_proxy_config()
+    return [(proto, key) for proto, key in candidates
+            if backend.apply_requirement(proto, current=current, desired=_logical_proxy_config({proto: key}))
+            is not ApplyRequirement.COMMON_CORE_RESTART]
+
+
 def _active_key_endpoint_healthy(proto, key):
     if not _post_apply_current_matches(proto, key):
         return False
@@ -1604,7 +1630,8 @@ def _active_key_endpoint_healthy(proto, key):
     # loaded. Only the controlled runtime receipt plus data-plane evidence can.
     if globals().get('proxy_live_backend') is None:
         return False
-    return _try_live_key_apply(proto, key) is not None
+    from proxy_apply_result import requires_common_restart
+    return not requires_common_restart(_try_live_key_apply(proto, key))
 
 
 def _apply_manual_key_safely(
@@ -1630,7 +1657,7 @@ def _apply_manual_key_safely(
         if pool_enabled:
             should_resume_probe, pause_note = _pause_pool_probe_for_apply()
         same_active_key = _post_apply_current_matches(proto, key)
-        result = _install_key_for_protocol(proto, key, verify=False, require_health=False)
+        result = _install_key_for_protocol(proto, key, verify=False, require_health=False, automatic=False)
         discard_previous = globals().get('_discard_superseded_failover_transactions')
         if callable(discard_previous):
             discard_previous(proto)
@@ -1893,6 +1920,9 @@ def _confirm_failover_services(proto, key_value, service, deadline=None):
 
 
 def _attempt_auto_failover():
+    maintenance = globals().get('_key_apply_maintenance_active')
+    if callable(maintenance) and maintenance():
+        return False
     telegram_route_proto = _telegram_route_protocol()
     if not telegram_route_proto:
         return False
@@ -1934,6 +1964,10 @@ def _attempt_auto_failover():
 
         service_deadline = time.time() + 120
         def select_service_candidate(candidates, service='telegram'):
+            candidates = _automatic_hot_candidates(candidates)
+            if not candidates:
+                auto_failover_state['deferred_reason'] = 'Для смены транспорта нужен общий перезапуск Xray; примените ключ вручную.'
+                return None
             remaining = service_deadline - time.time() - 20
             if remaining < 1:
                 return None
@@ -1950,6 +1984,8 @@ def _attempt_auto_failover():
             failover_candidates=_key_pool_store().failover_candidates,
             find_pool_failover_candidate=select_service_candidate,
             install_key_for_protocol=_install_key_for_protocol,
+            restore_key_for_protocol=lambda proto, key, verify=False: _install_key_for_protocol(
+                proto, key, verify=verify, require_health=False, automatic=True),
             update_proxy=update_proxy,
             set_active_key=_set_active_key,
             record_key_probe=_record_key_probe,
@@ -2193,10 +2229,10 @@ def _check_youtube_protocol_once(
             if throughput is not None:
                 metrics['yt_throughput_mbps'] = throughput
             elif quality_error:
-                metrics['yt_quality_error'] = str(quality_error).splitlines()[0][:120]
+                metrics['quality_error'] = _redact_sensitive_text(quality_error)
             metrics.update(_youtube_scored_metrics(metrics, yt_ok=True))
         except Exception as exc:
-            metrics['yt_quality_error'] = _redact_sensitive_text(exc)
+            metrics['quality_error'] = _redact_sensitive_text(exc)
     return ok, message
 
 
@@ -2370,7 +2406,7 @@ def _restore_youtube_key_after_failed_failover(proto, original_key, expected_cur
             return bool(original_key and current_key == original_key)
         _update_youtube_failover_transaction('restore_started')
         try:
-            _install_key_for_protocol(proto, original_key, verify=False)
+            _install_key_for_protocol(proto, original_key, verify=False, require_health=False, automatic=True)
             restored_key = (_load_current_keys().get(proto) or '').strip()
             if restored_key != original_key:
                 raise RuntimeError('исходный ключ не подтверждён после восстановления')
@@ -2700,6 +2736,9 @@ def _recover_interrupted_youtube_failover_transaction():
         current_id = _hash_key(current_key) if current_key else ''
 
         if transaction['phase'] == 'candidate_verified' and candidate_key and current_id == transaction['candidate_id']:
+            contract = _current_failover_service_contracts().get(proto)
+            if contract:
+                _failover_service_contracts[('youtube', proto)] = contract
             confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_detailed(proto)
             tg_ok = None
             if confirm_ok and proxy_mode == proto:
@@ -2710,30 +2749,34 @@ def _recover_interrupted_youtube_failover_transaction():
                 )
                 confirm_ok = bool(tg_ok)
             if confirm_ok:
-                _set_active_key(proto, candidate_key)
+                services_ok, _services_message = _confirm_failover_services(proto, candidate_key, 'youtube')
+                confirm_ok = services_ok is True
+            if str(_load_current_keys().get(proto) or '').strip() != candidate_key:
                 _clear_youtube_failover_transaction()
-                _audit_key_switch(
-                    'youtube_auto_failover_recovery',
-                    proto,
-                    candidate_key,
-                    confirm_message,
-                )
-                _record_key_probe(
-                    proto,
-                    candidate_key,
-                    tg_ok=tg_ok,
-                    yt_ok=True,
-                    verification_kind='runtime',
-                    **confirm_metrics,
-                )
-                _invalidate_web_status_cache()
-                _invalidate_key_status_cache()
+                state.update(phase='', recovery_failed=False, deferred_reason='сохранён новый ручной выбор')
+                return False
+            if confirm_ok:
+                _set_active_key(proto, candidate_key)
+                state.update(active_key_id=_hash_key(candidate_key), last_fail=0.0,
+                             consecutive_failures=0, phase='', recovery_failed=False,
+                             deferred_reason='', retry_not_before=0.0)
                 _reset_youtube_quality_state(
                     state,
                     health_state='healthy',
                     reason='прерванное переключение успешно восстановлено',
                     now=time.time(),
                 )
+                try:
+                    _clear_youtube_failover_transaction()
+                    _audit_key_switch('youtube_auto_failover_recovery', proto, candidate_key,
+                                      'восстановление прерванной подтверждённой смены',
+                                      confirmation=confirm_message, trigger=transaction.get('trigger', ''))
+                    _record_key_probe(proto, candidate_key, tg_ok=tg_ok, yt_ok=True,
+                                      verification_kind='runtime', **confirm_metrics)
+                    _invalidate_web_status_cache()
+                    _invalidate_key_status_cache()
+                except Exception as exc:
+                    _write_runtime_log(f'YouTube recovery: committed; bookkeeping deferred ({type(exc).__name__}).')
                 _write_runtime_log('YouTube failover: interrupted verified candidate was confirmed and committed.')
                 return True
             _write_runtime_log(f'YouTube failover: interrupted candidate confirmation failed: {confirm_message}')
@@ -2813,7 +2856,7 @@ def _recover_interrupted_telegram_failover_transaction():
         current_key = str(_load_current_keys().get(proto) or '').strip()
         if current_key != original_key:
             _update_telegram_failover_transaction('restore_started')
-            _install_key_for_protocol(proto, original_key, verify=False)
+            _install_key_for_protocol(proto, original_key, verify=False, require_health=False, automatic=True)
             update_result = update_proxy(proto)
             if isinstance(update_result, tuple) and update_result and update_result[0] is False:
                 raise RuntimeError(str(update_result[1] or 'failed to restore Telegram route'))
@@ -2859,6 +2902,7 @@ def _switch_youtube_to_verified_candidate(
     reason,
     current_score=0,
 ):
+    from proxy_apply_result import AutomaticApplyBlocked
     now = time.time()
     failure_deadline = float(state.get('failure_deadline') or 0.0) if trigger == 'failed' else 0.0
     if trigger == 'failed' and _youtube_failover_policy().remaining_seconds(failure_deadline, now=now) <= 0:
@@ -2893,6 +2937,14 @@ def _switch_youtube_to_verified_candidate(
         for proto, key_value in candidates
         if key_value not in other_active_keys
     ]
+    capability_filter = globals().get('_automatic_hot_candidates')
+    if candidates and callable(capability_filter):
+        candidates = capability_filter(candidates)
+        if not candidates:
+            state['deferred_reason'] = 'Для смены текущего или нового транспорта нужен общий перезапуск Xray; примените ключ вручную.'
+            state['phase'] = 'waiting_retry'
+            state['retry_not_before'] = time.time() + YOUTUBE_ROUTE_FAILOVER_SWITCH_COOLDOWN_SECONDS
+            return False
     candidates = _youtube_failover_policy().prioritize_candidates(
         candidates,
         probe_cache=probe_cache,
@@ -2911,6 +2963,8 @@ def _switch_youtube_to_verified_candidate(
     state['last_trigger'] = trigger
     state['deferred_reason'] = ''
     original_key = active_key
+    committed = False
+    last_installed_candidate = ''
     try:
         _write_runtime_log(
             f'YouTube failover: {_pool_proto_label(route_proto)} trigger={trigger}; '
@@ -3050,6 +3104,13 @@ def _switch_youtube_to_verified_candidate(
             finally:
                 pool_apply_lock.release()
             if install_error is not None:
+                if isinstance(install_error, AutomaticApplyBlocked):
+                    _clear_youtube_failover_transaction()
+                    state['phase'] = 'waiting_retry'
+                    state['retry_not_before'] = time.time() + YOUTUBE_ROUTE_FAILOVER_SWITCH_COOLDOWN_SECONDS
+                    state['deferred_reason'] = str(install_error)
+                    # This is a capability limit. Keep both key ratings intact.
+                    return False
                 _record_key_probe(
                     route_proto,
                     key_value,
@@ -3216,18 +3277,7 @@ def _switch_youtube_to_verified_candidate(
                 _set_active_key(route_proto, key_value)
             finally:
                 pool_apply_lock.release()
-            _clear_youtube_failover_transaction()
-            _audit_key_switch('youtube_auto_failover', route_proto, key_value, confirm_message)
-            _record_key_probe(
-                route_proto,
-                key_value,
-                tg_ok=tg_ok,
-                yt_ok=True,
-                verification_kind='runtime',
-                **confirm_metrics,
-            )
-            _invalidate_web_status_cache()
-            _invalidate_key_status_cache()
+            committed = True
             state['active_key_id'] = _hash_key(key_value)
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
@@ -3237,6 +3287,18 @@ def _switch_youtube_to_verified_candidate(
                 reason='автоматически выбран проверенный ключ',
                 now=time.time(),
             )
+            state['phase'] = ''
+            state['retry_not_before'] = 0.0
+            state['recovery_failed'] = False
+            _clear_youtube_failover_transaction()
+            _audit_key_switch('youtube_auto_failover', route_proto, key_value, reason,
+                              confirmation=confirm_message, application=result, trigger=trigger)
+            _record_key_probe(
+                route_proto, key_value, tg_ok=tg_ok, yt_ok=True,
+                verification_kind='runtime', **confirm_metrics,
+            )
+            _invalidate_web_status_cache()
+            _invalidate_key_status_cache()
             _write_runtime_log(
                 f'YouTube failover: switched {_pool_proto_label(route_proto)} to {key_hash}; '
                 f'YouTube is available on permanent port. {result}'
@@ -3252,9 +3314,23 @@ def _switch_youtube_to_verified_candidate(
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
         return False
+    except Exception as exc:
+        if committed:
+            # The verified candidate is already durable. Optional bookkeeping
+            # cannot make it an uncommitted attempt or reapply it next cycle.
+            _write_runtime_log(f'YouTube failover: committed; bookkeeping deferred ({type(exc).__name__}).')
+            return True
+        state['deferred_reason'] = 'попытка прервана; проверяется восстановление исходного ключа'
+        _restore_youtube_key_after_failed_failover(
+            route_proto, original_key, expected_current_key=last_installed_candidate or original_key,
+        )
+        return False
     finally:
-        _memory_cleanup('youtube failover finished', force=True, clear_status=True)
         state['in_progress'] = False
+        try:
+            _memory_cleanup('youtube failover finished', force=True, clear_status=True)
+        except Exception:
+            pass
 
 
 def _handle_confirmed_youtube_hard_failure(
@@ -4416,7 +4492,7 @@ def _recent_event_history_match(action, *, protocol='', service='', max_age_seco
     return False
 
 
-def _audit_key_switch(source, proto, key_value, reason=''):
+def _audit_key_switch(source, proto, key_value, reason='', *, confirmation='', application='', trigger=''):
     key_value = (key_value or '').strip()
     key_id = _hash_key(key_value)[:12] if key_value else ''
     try:
@@ -4424,7 +4500,9 @@ def _audit_key_switch(source, proto, key_value, reason=''):
     except Exception:
         display_name = ''
     display_name = re.sub(r'[\r\n\t]+', ' ', display_name).strip()[:120]
-    reason = re.sub(r'[\r\n\t]+', ' ', str(reason or '')).strip()[:220]
+    reason = re.sub(r'[\r\n\t]+', ' ', _redact_sensitive_text(reason)).strip()[:220]
+    confirmation = re.sub(r'[\r\n\t]+', ' ', _redact_sensitive_text(confirmation)).strip()[:220]
+    application = re.sub(r'[\r\n\t]+', ' ', _redact_sensitive_text(application)).strip()[:220]
     line = (
         f'{time.strftime("%Y-%m-%d %H:%M:%S %z")}\t'
         f'source={source}\tproto={proto}\tkey_id={key_id}\tname={display_name}\treason={reason}\n'
@@ -4451,6 +4529,9 @@ def _audit_key_switch(source, proto, key_value, reason=''):
         details={
             'mode': 'automatic' if auto_source else 'manual',
             'reason': reason,
+            'trigger': str(trigger or '')[:32],
+            'confirmation': confirmation,
+            'application': application,
         },
     )
 
@@ -6588,6 +6669,19 @@ def _conntrack_route_diagnostic(proto, sample_limit=6):
     }
 
 
+def _youtube_media_destination_ips():
+    from youtube_stream_evidence import media_addresses
+    now = time.time()
+    view = globals().get('_youtube_media_address_view', {})
+    if 0 <= now - view.get('at', 0) < 30:
+        return view.get('addresses', set())
+    path = getattr(config, 'youtube_edge_prefetch_cache_path', '/opt/etc/bot/youtube_edge_cache.json')
+    cache = _read_json_file(path, {}) or {}
+    addresses = media_addresses(cache, now=now)
+    globals()['_youtube_media_address_view'] = {'at': now, 'addresses': addresses}
+    return addresses
+
+
 def _youtube_active_connection_count(proto, *, require_downlink=False):
     if not YOUTUBE_STREAM_GUARD_ENABLED:
         return 0
@@ -6598,6 +6692,8 @@ def _youtube_active_connection_count(proto, *, require_downlink=False):
     state = _youtube_stream_guard_state(proto)
     if require_downlink:
         state = state.setdefault('incoming_media', {})
+    media_loader = globals().get('_youtube_media_destination_ips')
+    media_ips = media_loader() if require_downlink and callable(media_loader) else set()
     last_scan_at = float(state.get('last_scan_at') or 0.0)
     if last_scan_at and now - last_scan_at < YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS:
         try:
@@ -6631,6 +6727,8 @@ def _youtube_active_connection_count(proto, *, require_downlink=False):
                 old = previous.get(identity, {})
                 if require_downlink:
                     from youtube_stream_evidence import reply_counters, incoming_progress
+                    if _conntrack_tuple_summary(line).get('orig_dst') not in media_ips:
+                        continue
                     reply = reply_counters(line)
                     if reply:
                         current[identity].update(reply)
@@ -10632,6 +10730,7 @@ def _pool_summary_with_latest_run(summary, latest_run=None, current_run=None):
     result['latest_run'] = latest_run
     result['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
     result['automation_status'] = _scheduled_checks_status()
+    result['latest_run_text'] = result['automation_status'].get('last_check') or result['latest_run_text']
     return result
 
 
@@ -10671,7 +10770,7 @@ def _scheduled_checks_status():
             # Its live state takes priority over the saved pause, for this run only.
             nightly = dict(nightly, status='running', checked=live_progress[0],
                            total=live_progress[1], finished_at=0, next_retry_at=0, reason='')
-    manual = payload.get('last_manual_run') or (latest if latest.get('scope') and latest.get('scope') != 'nightly_subscription' else {})
+    manual = payload.get('last_manual_run') or (latest if latest.get('scope') != 'nightly_subscription' else {})
     automatic = payload.get('last_automatic_run') or (latest if latest.get('scope') == 'nightly_subscription' else {})
     if not automatic and nightly.get('status') == 'completed':
         automatic = nightly
@@ -10682,7 +10781,7 @@ def _scheduled_checks_status():
     lines = background_policy.status_lines(
         nightly, manual, automatic, records,
         time_text=lambda stamp: time.strftime('%d.%m %H:%M', time.localtime(float(stamp))),
-        enabled=SUBSCRIPTION_AUTO_REFRESH_ENABLED, reason=reason, details=details, retry_at=retry_at,
+        enabled=SUBSCRIPTION_AUTO_REFRESH_ENABLED, reason=reason, details=details, retry_at=retry_at, latest=latest,
     )
     scheduled_checks_view_cache.update(signature=signature, lines=lines)
     return dict(lines)
@@ -11467,9 +11566,10 @@ _pool_delete_context = threading.local()
 
 
 def _clear_installed_key_for_protocol(proto):
+    from proxy_apply_result import requires_common_restart
     if globals().get('proxy_live_backend') is not None:
         result = _try_live_key_apply(proto, '', require_health=False)
-        if result is not None:
+        if not requires_common_restart(result):
             return result
     if proto == 'vmess':
         for file_path in _v2ray_key_file_candidates(VMESS_KEY_PATH):
@@ -11549,7 +11649,7 @@ def _delete_pool_key(proto, key_value):
     _pool_delete_context.removed_keys = (key_value,)
     try:
         if promoted_key:
-            _install_key_for_protocol(proto, promoted_key, verify=False, require_health=False)
+            _install_key_for_protocol(proto, promoted_key, verify=False, require_health=False, automatic=False)
             _audit_key_switch('pool_delete_promote', proto, promoted_key, 'active key deleted')
         elif should_clear_current:
             _clear_installed_key_for_protocol(proto)
@@ -12115,6 +12215,10 @@ def _health_check_in_process(payload, timeout_seconds=None):
 
 
 def _check_telegram_api_for_background(proxy_url=None, connect_timeout=6, read_timeout=10):
+    maintenance = globals().get('_key_apply_maintenance_active')
+    generation = globals().get('_key_apply_maintenance_generation', 0)
+    if callable(maintenance) and maintenance():
+        return None, 'Ожидание свежей проверки после применения настроек.'
     if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE:
         payload = _run_quick_health_check_plan(({
             'kind': 'telegram',
@@ -12124,12 +12228,15 @@ def _check_telegram_api_for_background(proxy_url=None, connect_timeout=6, read_t
         },)).get('telegram')
         if not payload or payload.get('error'):
             return None, 'Telegram API check is unavailable; the last verified result is kept.'
-        return bool(payload.get('ok')), str(payload.get('message') or '')
-    return _check_telegram_api_through_proxy(
-        proxy_url,
-        connect_timeout=connect_timeout,
-        read_timeout=read_timeout,
-    )
+        result = bool(payload.get('ok')), str(payload.get('message') or '')
+    else:
+        result = _check_telegram_api_through_proxy(
+            proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout,
+        )
+    if (generation != globals().get('_key_apply_maintenance_generation', 0)
+            or callable(maintenance) and maintenance()):
+        return None, 'Результат проверки устарел после обслуживания Xray.'
+    return result
 
 
 def _check_youtube_protocol_for_background(
@@ -16757,9 +16864,24 @@ def _live_key_precheck(proto, key):
     return True
 
 
+def _key_apply_maintenance_active():
+    until = globals().get('_key_apply_maintenance_until', 0.0)
+    if not until:
+        return False
+    if time.monotonic() < until:
+        return True
+    globals()['_key_apply_maintenance_until'] = 0.0
+    # Require a new health check after our own outage; do not mark it healthy.
+    auto_failover_state.update(last_fail=0.0, consecutive_failures=0, last_failure_message='',
+                               force_recovery=False, hard_failure=False, failure_key_id='')
+    return False
+
+
 def _restart_cold_key_runtime(proto):
     """Only an explicitly unqualified hot change reaches this local restart."""
     from proxy_live_services import restart_service
+    globals()['_key_apply_maintenance_generation'] = globals().get('_key_apply_maintenance_generation', 0) + 1
+    globals()['_key_apply_maintenance_until'] = time.monotonic() + 60.0
     ports = {'shadowsocks': localportsh, 'trojan': localporttrojan}
     if proto in ports and not restart_service(proto, int(ports[proto]), enabled=bool(_load_current_keys().get(proto))):
         return False
@@ -16779,10 +16901,11 @@ def _restart_cold_key_runtime(proto):
     return False
 
 
-def _try_live_key_apply(proto, key, *, require_health=True):
+def _try_live_key_apply(proto, key, *, require_health=True, automatic=False):
+    from proxy_apply_result import ApplyRequirement, requires_common_restart
     backend = globals().get('proxy_live_backend')
     if backend is None or proto not in backend.allowed_protocols:
-        return None
+        return ApplyRequirement.COMMON_CORE_RESTART
     try:
         ticket = proxy_apply_control.active_ticket()
         current, desired = _logical_proxy_config(), _logical_proxy_config({proto: key})
@@ -16792,7 +16915,7 @@ def _try_live_key_apply(proto, key, *, require_health=True):
             precheck=lambda: _live_key_precheck(proto, key),
             require_health=require_health,
         )
-        if result is None and not require_health:
+        if requires_common_restart(result) and not require_health and not automatic:
             result = backend.apply_cold_manual(proto, key, current=current, desired=desired,
                 ticket=ticket, restart=_restart_cold_key_runtime)
             globals()['proxy_live_prepared_config'] = desired
@@ -16802,8 +16925,8 @@ def _try_live_key_apply(proto, key, *, require_health=True):
         code, message = describe_apply_error(exc)
         _write_runtime_log(f'Key apply rejected: protocol={proto} code={code}')
         raise RuntimeError(message) from None
-    if result is None:
-        return None
+    if requires_common_restart(result):
+        return ApplyRequirement.COMMON_CORE_RESTART
     if result == 'unhealthy':
         raise RuntimeError('Ключ сохранён, но передача данных через него сейчас не подтверждена. '
                            'Xray не перезапускался.')

@@ -197,14 +197,14 @@ def test_bot_install_uses_live_result_without_hidden_restart(tmp_path, outcome):
     bot_function('_try_live_key_apply', env)
     install = bot_function('_install_key_for_protocol', env)
     with coordinator.mutation(manual=True):
-        if outcome in ('error', 'unhealthy'):
+        if outcome in ('error', 'unhealthy', None):
             with pytest.raises(RuntimeError) as failure:
                 install('vless', 'synthetic', verify=False)
             assert 'private detail' not in str(failure.value)
             assert calls == ['live']
         else:
             result = install('vless', 'synthetic', verify=False)
-            assert calls == (['live', 'installer', 'cold'] if outcome is None else ['live'])
+            assert calls == ['live']
             assert ('без перезапуска' in result) == (outcome is not None)
 
 

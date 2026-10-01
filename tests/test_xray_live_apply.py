@@ -267,7 +267,7 @@ QUALIFIED_CASES = [
 ]
 
 
-def secure_candidates(lab, protocol, mux, security, targets, policy=None):
+def secure_candidates(lab, protocol, mux, security, targets, policy=None, network='tcp'):
     port, echo, start, api, connect = lab
     vision = security.endswith('-vision')
     security = security.removesuffix('-vision')
@@ -310,6 +310,11 @@ def secure_candidates(lab, protocol, mux, security, targets, policy=None):
                 'serverName': 'localhost', 'fingerprint': 'chrome',
                 'password': keys['Password'], 'shortId': 'aabb',
             }}
+        if network == 'xhttp':
+            for item in (inbound, outbound):
+                stream = item.setdefault('streamSettings', {'security': 'none'})
+                stream['network'] = 'xhttp'
+                stream['xhttpSettings'] = {'path': '/fixture', 'mode': 'packet-up'}
         start({'log': {'loglevel': 'none'}, 'policy': policy or {}, 'inbounds': [inbound], 'outbounds': [
             {'protocol': 'freedom', 'settings': {'redirect': f'127.0.0.1:{target}'}}
         ]})
@@ -317,6 +322,39 @@ def secure_candidates(lab, protocol, mux, security, targets, policy=None):
             outbound['mux'] = {'enabled': True, 'concurrency': 8, 'xudpConcurrency': 8}
         candidates.append(outbound)
     return candidates
+
+
+@pytest.mark.parametrize('old_network,new_network', [('tcp', 'xhttp'), ('xhttp', 'tcp'), ('xhttp', 'xhttp')])
+@pytest.mark.parametrize('security', ['none', 'tls', 'reality'])
+def test_xhttp_api_lab_preserves_adjacent_session_without_expanding_allowlist(lab, old_network, new_network, security):
+    """Transport experiment only: production still requires wider qualification."""
+    from xray_live_apply import qualify_outbound
+    port, echo, start, api, connect = lab
+    a, b = echo(b'A'), echo(b'B')
+    old_out = secure_candidates(lab, 'vless', False, security, (a,), network=old_network)[0]
+    new_out = secure_candidates(lab, 'vless', False, security, (b,), network=new_network)[0]
+    api_port, managed, control = port(), port(), port()
+    config = base_config(api_port, {'managed': managed, 'control-in': control}, a)
+    config['outbounds'][0] = dict(old_out, tag='generation-a')
+    proc = start(config)
+    wait_api(proc, api, api_port)
+    starttime = Path(f'/proc/{proc.pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+    adjacent = connect(control)
+    established = connect(managed)
+    exchange(adjacent, b'before', b'A')
+    exchange(established, b'before', b'A')
+    assert api(api_port, 'ado', config={'outbounds': [dict(new_out, tag='generation-b')]}).returncode == 0
+    assert api(api_port, 'bo', '-b', 'choice', 'generation-b').returncode == 0
+    for i in range(10):
+        exchange(adjacent, f'adjacent-{i}'.encode(), b'A')
+        exchange(established, f'established-{i}'.encode(), b'A')
+        exchange(connect(managed), f'candidate-{i}'.encode(), b'B')
+    assert api(api_port, 'bo', '-b', 'choice', 'generation-a').returncode == 0
+    exchange(connect(managed), b'restored', b'A')
+    exchange(adjacent, b'after', b'A')
+    assert proc.poll() is None
+    assert Path(f'/proc/{proc.pid}/stat').read_text().rsplit(')', 1)[1].split()[19] == starttime
+    assert not (qualify_outbound(old_out) and qualify_outbound(new_out))
 
 
 @pytest.mark.parametrize('protocol,mux,security', QUALIFIED_CASES)

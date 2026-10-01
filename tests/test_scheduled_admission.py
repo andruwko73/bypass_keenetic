@@ -193,8 +193,9 @@ def test_public_status_distinguishes_runs_and_deferral():
         {'status': 'completed', 'finished_at': 100}, {'status': 'failed', 'finished_at': 200},
         [{'last_success_at': 50, 'last_attempt_at': 60}], time_text=str, reason='memory',
         details={'available_kb': 100*1024, 'required_available_kb': 106*1024}, retry_at=300)
-    assert 'Ручная проверка: завершена' in lines['manual']
-    assert 'Автоматическая проверка: ошибка' in lines['automatic']
+    assert 'Последняя проверка: ошибка' in lines['last_check']
+    assert '200' in lines['last_check']
+    assert 'manual' not in lines and 'automatic' not in lines
     assert 'Доступно 100 МиБ' in lines['subscriptions']
     assert '300' in lines['queue']
 

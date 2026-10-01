@@ -15,6 +15,7 @@ from proxy_apply_attestation import AttestationStore
 from proxy_apply_coordinator import StaleApply, _atomic_json, core_process_identity
 from proxy_apply_plan import ChangeKind, PlanAction, classify_config_change, config_fingerprint, plan_proxy_apply
 from proxy_apply_state import ApplyFileBundle, ApplyStateError, _regular
+from proxy_apply_result import ApplyRequirement
 from xray_live_apply import (
     HysteriaCacheGuard, LiveApplyError, PersistUncertain, XrayApi, balancer_tag, managed_config,
     qualify_outbound, switch_prepared_outbound,
@@ -270,34 +271,43 @@ class ProxyLiveRuntime:
         state.update(updated)
         self._clear_pending()
 
-    def try_apply(self, protocol, key, *, current, desired, ticket, verify, precheck,
-                  require_health=True):
-        """Return 'hot'/'noop'/'unhealthy', or None for an explicit cold change.
-
-        The caller must not interpret an exception as a cold-restart request.
-        Without qualified detachment, previous handlers stay retained and
-        max_retained prevents unbounded accumulation. With it, manager refs
-        are detached only after the new configuration is durably committed.
-        """
-        self._owned()
+    def apply_requirement(self, protocol, *, current, desired):
+        """Pure capability check of both outbounds, before candidate probing."""
         change = classify_config_change(current, desired)
         if protocol not in self.allowed_protocols:
-            return None
+            return ApplyRequirement.COMMON_CORE_RESTART
         logical_tag = 'proxy-' + protocol
         old_out = {item['tag']: item for item in current['outbounds']}
         new_out = {item['tag']: item for item in desired['outbounds']}
         if (change not in (ChangeKind.UNCHANGED, ChangeKind.OUTBOUND) or logical_tag not in new_out):
-            return None
+            return ApplyRequirement.COMMON_CORE_RESTART
         if change == ChangeKind.OUTBOUND and (not qualify_outbound(new_out[logical_tag]) or
                                               not qualify_outbound(old_out[logical_tag])):
-            return None
+            return ApplyRequirement.COMMON_CORE_RESTART
         if (change == ChangeKind.OUTBOUND and protocol in self.service_protocols and self.service_qualifier and
                 not all(self.service_qualifier(protocol, item) for item in (old_out[logical_tag], new_out[logical_tag]))):
-            return None
+            return ApplyRequirement.COMMON_CORE_RESTART
         if change == ChangeKind.OUTBOUND and {
             tag for tag in old_out if json.dumps(old_out[tag], sort_keys=True) != json.dumps(new_out[tag], sort_keys=True)
         } != {logical_tag}:
-            return None
+            return ApplyRequirement.COMMON_CORE_RESTART
+        return (ApplyRequirement.PROTOCOL_SERVICE_RESTART if protocol in self.service_protocols
+                and change == ChangeKind.OUTBOUND else ApplyRequirement.HOT)
+
+    def try_apply(self, protocol, key, *, current, desired, ticket, verify, precheck,
+                  require_health=True):
+        """Return a completed mode or an explicit common-core restart requirement.
+
+        API/disk errors never authorize a restart. Retained generations remain
+        bounded and are detached only after durable commit when qualified.
+        """
+        self._owned()
+        requirement = self.apply_requirement(protocol, current=current, desired=desired)
+        if requirement is ApplyRequirement.COMMON_CORE_RESTART:
+            return requirement
+        change = classify_config_change(current, desired)
+        logical_tag = 'proxy-' + protocol
+        new_out = {item['tag']: item for item in desired['outbounds']}
         if self.bundle.pending() or self.pending_path.exists() or self.pending_path.is_symlink():
             raise LiveApplyError('An earlier transaction requires recovery')
         state = self._receipt()
@@ -312,7 +322,7 @@ class ProxyLiveRuntime:
         if not self.hysteria_guard.check(new_out[logical_tag], identity):
             # Official core cannot accept changed auth/TLS at a cached HY2
             # destination. Do not run a misleading "healthy" probe with old auth.
-            return None
+            return ApplyRequirement.COMMON_CORE_RESTART
         if change == ChangeKind.UNCHANGED:
             if not require_health:
                 # Attestation above confirms the installed state, not network

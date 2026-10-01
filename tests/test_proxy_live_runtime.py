@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 from proxy_apply_coordinator import ApplyCoordinator
 from proxy_live_runtime import ProxyLiveRuntime
+from proxy_apply_result import ApplyRequirement
 from xray_live_apply import LiveApplyError
 
 
@@ -381,7 +382,7 @@ def test_hysteria_collision_cannot_pass_using_cached_old_auth(setup):
     probes = []
     with runtime.coordinator.transaction(ticket, manual=True):
         assert runtime.try_apply('vless', 'new', current=config, desired=desired, ticket=ticket,
-            verify=lambda: probes.append('verify') or True, precheck=lambda: probes.append('precheck') or True) is None
+            verify=lambda: probes.append('verify') or True, precheck=lambda: probes.append('precheck') or True) is ApplyRequirement.COMMON_CORE_RESTART
     assert probes == [] and runtime.api.calls == []
     assert runtime.key_paths['vless'].read_text() == 'old-key\n'
 
@@ -391,7 +392,7 @@ def test_native_success_cannot_bypass_dependent_service_capability(setup):
     runtime.service_protocols = frozenset(('vless',))
     runtime.service_qualifier = lambda protocol, outbound: False
     result, _ = apply(runtime, config)
-    assert result is None and runtime.api.calls == []
+    assert result is ApplyRequirement.COMMON_CORE_RESTART and runtime.api.calls == []
     assert runtime.key_paths['vless'].read_text() == 'old-key\n'
 
 

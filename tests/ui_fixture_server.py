@@ -367,11 +367,10 @@ def _pool_summary(cache=None):
         'checked': 0,
         'total': summary.get('pool_total_count', 0),
     }
-    summary['latest_run_text'] = 'Последняя проверка завершена · 01.08 03:00'
+    summary['latest_run_text'] = 'Последняя проверка: завершена · 29.09 03:30.'
     summary['automation_status'] = {
         'subscriptions': 'Подписки: последнее успешное обновление 29.09 03:00.',
-        'manual': 'Ручная проверка: завершена · 26.09 22:14.',
-        'automatic': 'Автоматическая проверка: завершена · 29.09 03:30.',
+        'last_check': summary['latest_run_text'],
         'queue': 'По расписанию: ожидает. Недостаточно свободной оперативной памяти. Следующая попытка 29.09 03:35.',
     }
     return summary

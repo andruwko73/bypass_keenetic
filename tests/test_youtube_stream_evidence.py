@@ -61,7 +61,9 @@ def test_bot_scan_separates_receive_evidence_from_general_traffic_guard():
         '_youtube_stream_guard_state': lambda proto: state, 'time': SimpleNamespace(time=lambda: now[0]),
         'open': lambda *args, **kwargs: io.StringIO(line[0]),
         '_conntrack_packets_bytes': lambda text: (sum(map(int,re.findall(r'packets=(\d+)',text))),sum(map(int,re.findall(r'bytes=(\d+)',text)))),
-        '_conntrack_identity': lambda text: 'one-connection', '_conntrack_tuple_summary': lambda text: {}}
+        '_conntrack_identity': lambda text: 'one-connection',
+        '_youtube_media_destination_ips': lambda: {'203.0.113.1'},
+        '_conntrack_tuple_summary': lambda text: {'orig_dst': '203.0.113.1'}}
     exec(compile(ast.Module(body=[node], type_ignores=[]), 'bot-scan', 'exec'), env)
     scan = env['_youtube_active_connection_count']
     assert scan('vless2') == 1  # Existing upload/general guard stays compatible.

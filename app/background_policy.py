@@ -1,5 +1,15 @@
 """Admission budgets for scheduled work, independent of application state."""
 
+import math
+
+
+def _finished_timestamp(record):
+    try:
+        stamp = float(record.get('finished_at') or 0)
+        return stamp if math.isfinite(stamp) and stamp > 0 else 0
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
 # Each admission leaves an emergency reserve plus the task's bounded workspace.
 # Workers also recheck their existing live memory/CPU guards between probes.
 TASK_BUDGETS_KB = {
@@ -55,7 +65,7 @@ def deferral_text(reason, details=None):
     return text
 
 
-def status_lines(nightly, manual, automatic, subscriptions, *, time_text, enabled=True, reason='', details=None, retry_at=0):
+def status_lines(nightly, manual, automatic, subscriptions, *, time_text, enabled=True, reason='', details=None, retry_at=0, latest=None):
     """Only public timestamps/states enter this view; no keys or source URLs."""
     lines = {}
     last_success = max((float(r.get('last_success_at') or 0) for r in subscriptions), default=0)
@@ -71,15 +81,15 @@ def status_lines(nightly, manual, automatic, subscriptions, *, time_text, enable
         if retry_at:
             lines['subscriptions'] += f' Следующая попытка {time_text(retry_at)}.'
     labels = {'completed': 'завершена', 'cancelled': 'остановлена', 'failed': 'ошибка', 'paused': 'приостановлена'}
-    for kind, record, title in (
-        ('manual', manual, 'Ручная проверка'),
-        ('automatic', automatic, 'Автоматическая проверка'),
-    ):
-        stamp = float(record.get('finished_at') or 0)
-        lines[kind] = (
-            f'{title}: {labels.get(record.get("status"), "завершена")} · {time_text(stamp)}.'
-            if stamp else f'{title}: завершений ещё не записано.'
-        )
+    terminal = [r for r in (manual, automatic, latest or {}) if r.get('status') in ('completed', 'cancelled', 'failed')
+                and _finished_timestamp(r)]
+    latest = max(terminal, key=_finished_timestamp, default={})
+    lines['last_check'] = (
+        f'Последняя проверка: {labels[latest["status"]]} · {time_text(latest["finished_at"])}.'
+        if latest else 'Последняя проверка: завершённых запусков пока нет.'
+    )
+    if latest.get('total'):
+        lines['last_check'] += f' Проверено {int(latest.get("checked") or 0)} из {int(latest["total"])}.'
     status = nightly.get('status')
     if status in ('pending', 'running', 'paused', 'failed'):
         label = {'pending': 'ожидает', 'running': 'выполняется', 'paused': 'приостановлена', 'failed': 'ожидает повтора'}[status]

@@ -59,7 +59,7 @@ jobs:
           XRAY_TEST_BINARY="$RUNNER_TEMP/xray" HYSTERIA_TEST_BINARY="$RUNNER_TEMP/hysteria" python -m pytest tests/test_xray_hot_hysteria.py -q
 
       - name: YouTube failover receive evidence
-        run: python -m pytest tests/test_youtube_stream_evidence.py -q
+        run: python -m pytest tests/test_youtube_stream_evidence.py tests/test_auto_failover_contract.py -q
 
       - name: Route service failover admission
         run: python -m pytest tests/test_failover_services.py -q

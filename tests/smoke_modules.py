@@ -3300,7 +3300,7 @@ def test_youtube_route_failover_fast_and_quality_paths_are_wired():
     script = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert "profile='emergency'" in runtime
     assert "from pool_probe_curl import check_http_through_proxy as check_http" in source
-    assert "'emergency': ((YOUTUBE_PRIMARY_URL,), 1, 0)" in (APP_ROOT / 'youtube_healthcheck.py').read_text(encoding='utf-8')
+    assert youtube_healthcheck.YOUTUBE_HEALTHCHECK_PROFILES['emergency'][0] == youtube_healthcheck.YOUTUBE_HEALTHCHECK_PULSE_URLS
     assert 'youtube_route_failover_poll_seconds' in source
     assert 'measure_youtube_quality=True' in source
     assert 'measure_quality=True' in ast.get_source_segment(
@@ -4005,6 +4005,9 @@ def test_youtube_transaction_recovery_refreshes_runtime_state():
         '_load_current_keys': lambda: {'vless2': 'candidate'},
         '_hash_key': lambda key: 'b' * 40 if key == 'candidate' else 'a' * 40,
         '_confirm_youtube_key_detailed': lambda _proto: (True, 'ok', 1, {'yt_score': 90}),
+        '_current_failover_service_contracts': lambda: {'vless2': {'revision': 'fixture'}},
+        '_failover_service_contracts': {},
+        '_confirm_failover_services': lambda *args: (True, 'ok'),
         'proxy_mode': 'vless2',
         'proxy_settings': {'vless2': 'socks'},
         'AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT': 2,
@@ -4012,7 +4015,7 @@ def test_youtube_transaction_recovery_refreshes_runtime_state():
         '_check_telegram_api_for_background': lambda *args, **kwargs: (True, 'ok'),
         '_set_active_key': lambda *args: calls.append(('active', args[0])),
         '_clear_youtube_failover_transaction': lambda: calls.append(('clear',)) or True,
-        '_audit_key_switch': lambda *args: calls.append(('audit', args[0])),
+        '_audit_key_switch': lambda *args, **kwargs: calls.append(('audit', args[0])),
         '_record_key_probe': lambda *args, **kwargs: calls.append(('probe', kwargs.get('yt_ok'))),
         '_invalidate_web_status_cache': lambda: calls.append(('web_cache',)),
         '_invalidate_key_status_cache': lambda: calls.append(('key_cache',)),
@@ -4032,6 +4035,12 @@ def test_youtube_transaction_recovery_refreshes_runtime_state():
     assert ('probe', True) in calls
     assert ('web_cache',) in calls and ('key_cache',) in calls
     assert ('reset', 'healthy') in calls
+    namespace['_audit_key_switch'] = lambda *args, **kwargs: (_ for _ in ()).throw(OSError('audit unavailable'))
+    state.update(last_fail=99, consecutive_failures=3)
+    assert namespace['_recover_interrupted_youtube_failover_transaction']() is True
+    assert state['last_fail'] == state['consecutive_failures'] == 0
+    namespace['_confirm_failover_services'] = lambda *args: (False, 'service unavailable')
+    assert namespace['_recover_interrupted_youtube_failover_transaction']() is False
 
 
 def test_youtube_failed_candidate_escalates_restore_failure():
@@ -4163,7 +4172,7 @@ def test_youtube_healthcheck_detects_first_load_instability():
     assert metrics['yt_home_ok'] is True
     assert metrics['yt_bootstrap_ok'] is True
     assert metrics['googlevideo_ok'] is False
-    assert metrics['yt_stability'] == 'fail'
+    assert metrics['yt_stability'] == 'partial'
     assert metrics['yt_error_rate'] > 0
     assert 'unexpected EOF' in metrics['yt_last_error']
 
@@ -4186,7 +4195,7 @@ def test_youtube_healthcheck_requires_watch_page():
     assert 'Required YouTube endpoint did not respond' in message
     assert metrics['yt_home_ok'] is True
     assert metrics['yt_watch_ok'] is False
-    assert metrics['yt_stability'] == 'fail'
+    assert metrics['yt_stability'] == 'partial'
 
 
 def test_youtube_healthcheck_retries_transient_watch_page():
@@ -4257,7 +4266,7 @@ def test_youtube_healthcheck_rejects_http_client_error_status():
     assert 'Required YouTube endpoint' in message
     assert metrics['yt_home_ok'] is False
     assert metrics['googlevideo_ok'] is True
-    assert metrics['yt_stability'] == 'fail'
+    assert metrics['yt_stability'] == 'partial'
 
 
 def test_youtube_healthcheck_tolerates_single_quick_home_timeout():
@@ -4379,7 +4388,7 @@ def test_youtube_healthcheck_rejects_failed_googlevideo_media_endpoint():
     assert ok is False
     assert 'redirector.googlevideo.com' in message
     assert metrics['googlevideo_ok'] is False
-    assert metrics['yt_stability'] == 'fail'
+    assert metrics['yt_stability'] == 'partial'
     assert metrics['yt_error_rate'] > 0
 
 
@@ -11242,7 +11251,7 @@ def test_persisted_full_pool_run_accumulates_resume_and_drives_completion_summar
             "light = bot._light_pool_summary_with_cache_fallback({}, {}, [])\n"
             "assert light['latest_run']['status'] == 'cancelled' and light['last_finished_run']['status'] == 'cancelled'\n"
             "assert light['current_run'] == {}\n"
-            "assert '2 из 5' in light['latest_run_text'] and 'stopped' in light['latest_run_text']\n"
+            "assert '2 из 5' in light['latest_run_text'] and 'остановлена' in light['latest_run_text']\n"
             "summary = {'active_text': '1 / 5', 'pool_total_count': 8, 'checked_pool_count': 8, 'services': [], 'latest_run': latest}\n"
             "text = bot._format_pool_probe_completion_summary(summary)\n"
             "assert 'Проверка всех ключей завершена' in text\n"
@@ -11966,7 +11975,7 @@ def test_telegram_bot_menu_button_smoke():
         bot_module._app_mode_pool_enabled = lambda: True
         bot_module.pool_apply_lock = threading.Lock()
         bot_module._pause_pool_probe_for_apply = lambda: (apply_events.append('pause') or (True, 'paused'))
-        bot_module._install_key_for_protocol = lambda proto, key, verify=False, require_health=True: (
+        bot_module._install_key_for_protocol = lambda proto, key, verify=False, require_health=True, automatic=True: (
             apply_events.append(('install', proto, key, verify, require_health)) or 'installed'
         )
         bot_module._set_active_key = lambda proto, key: apply_events.append(('active', proto, key))

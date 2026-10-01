@@ -417,7 +417,7 @@ _PROBE_RECORD_ALLOWED_FIELDS = frozenset((
     'yt_watch_ok', 'yt_short_ok', 'yt_bootstrap_ok', 'googlevideo_ok',
     'yt_error_rate', 'yt_last_error', 'yt_stability', 'yt_first_load_ms',
     'yt_throughput_mbps', 'yt_score', 'yt_quality', 'yt_stream_tier',
-    'quality_error', 'stable_latency_ms', 'fast_latency_ms', 'min_1600p_mbps',
+    'quality_error', 'yt_quality_error', 'yt_endpoint_results', 'stable_latency_ms', 'fast_latency_ms', 'min_1600p_mbps',
     'min_4k_mbps', 'allow_recent_success_downgrade', 'verification_kind',
 ))
 

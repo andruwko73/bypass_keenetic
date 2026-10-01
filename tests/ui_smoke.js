@@ -1081,7 +1081,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     const latestRun = page.locator('#pool-latest-run-summary');
     const latestRunText = (await latestRun.innerText()).trim();
-    if (!(await latestRun.isVisible()) || !latestRunText.includes('Последняя проверка завершена')) {
+    if (!(await latestRun.isVisible()) || !latestRunText.includes('Последняя проверка: завершена')) {
       throw new Error(`${name}: latest full pool run is not shown explicitly: ${latestRunText}`);
     }
     if (latestRunText.includes('0 из')) {

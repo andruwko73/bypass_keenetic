@@ -81,6 +81,11 @@ def attempt_youtube_failover(context):
     if route_proto not in YOUTUBE_ROUTE_PROTOCOLS:
         return False
     state = _youtube_failover_state(route_proto)
+    maintenance = context.get('_key_apply_maintenance_active')
+    if callable(maintenance) and maintenance():
+        state['deferred_reason'] = 'ожидание свежей проверки после применения настроек'
+        return False
+    maintenance_generation = context.get('_key_apply_maintenance_generation', 0)
     recovery_result = _recover_interrupted_youtube_failover_transaction()
     if recovery_result is not None:
         return bool(recovery_result)
@@ -116,6 +121,10 @@ def attempt_youtube_failover(context):
         retry_unstable=False,
     )
     latest_active_key = str(_load_current_keys().get(route_proto) or '').strip()
+    if (context.get('_key_apply_maintenance_generation', 0) != maintenance_generation
+            or callable(maintenance) and maintenance()):
+        state['deferred_reason'] = 'результат проверки устарел после обслуживания Xray'
+        return False
     if latest_active_key != active_key:
         state.clear()
         state.update(_new_youtube_failover_state())
@@ -143,6 +152,9 @@ def attempt_youtube_failover(context):
     state['last_health_reason'] = health_reason
     state['last_quality_score'] = int(yt_metrics.get('yt_score') or 0)
     state['deferred_reason'] = ''
+    if health_state != 'partial':
+        state['partial_since'] = 0.0
+        state['partial_checks'] = 0
 
     if health_state == 'healthy':
         reset_control_failures(state)
@@ -172,7 +184,7 @@ def attempt_youtube_failover(context):
         return False
     state['retry_not_before'] = 0.0
 
-    if health_state == 'failed':
+    if health_state in ('failed', 'partial'):
         failure_message = message or health_reason
         hard_proxy_failure = bool(_youtube_failure_is_hard_proxy_failure(failure_message))
         stream_active = False
@@ -202,6 +214,36 @@ def attempt_youtube_failover(context):
                 'while media traffic was progressing; hard failover suppressed.'
             )
             return False
+
+    if health_state == 'partial':
+        state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
+        state['hard_failure_confirmed_at'] = 0.0
+        state['failure_deadline'] = 0.0
+        state['partial_since'] = float(state.get('partial_since') or now)
+        state['partial_checks'] = int(state.get('partial_checks') or 0) + 1
+        state['deferred_reason'] = 'ожидание повторного подтверждения частичного отказа контрольных адресов'
+        if state['partial_checks'] < 3 or now - state['partial_since'] < 60:
+            return False
+        if pool_probe_lock.locked():
+            return False
+        confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_detailed(
+            route_proto, measure_quality=False,
+        )
+        confirm_state, confirm_reason, confirm_metrics = _youtube_health_state(confirm_ok, confirm_metrics)
+        if confirm_state == 'unknown':
+            return False
+        if confirm_state == 'partial':
+            return _switch_youtube_to_verified_candidate(
+                route_proto, active_key, current_keys, state, trigger='partial', reason=confirm_reason,
+            )
+        state['partial_since'] = 0.0
+        state['partial_checks'] = 0
+        if confirm_ok:
+            _record_key_probe(route_proto, active_key, yt_ok=True, **confirm_metrics)
+            _reset_youtube_quality_state(state, health_state=confirm_state, reason=confirm_reason, now=now)
+            return False
+        health_state, health_reason = confirm_state, confirm_reason
 
     if health_state == 'degraded':
         state['last_fail'] = 0.0
@@ -370,6 +412,12 @@ def attempt_youtube_failover(context):
                 )
             return False
 
+        confirm_state, confirm_reason, confirm_metrics = _youtube_health_state(False, confirm_metrics)
+        if confirm_state == 'partial':
+            state.update(last_fail=0.0, consecutive_failures=0, failure_deadline=0.0,
+                         hard_failure_confirmed_at=0.0, last_health_state='partial',
+                         last_health_reason=confirm_reason, deferred_reason=confirm_reason)
+            return False
         # Route-wide byte counters cannot identify the exact application. Do
         # not let unrelated incoming traffic overrule a failed multi-endpoint
         # YouTube confirmation indefinitely. Candidate validation still follows.
