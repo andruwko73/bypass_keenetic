@@ -747,11 +747,9 @@ def cleanup_runtime_service_route_intersections(
 ):
     if report is None:
         import route_intersections
-        report = route_intersections.analyze_route_intersections(
-            unblock_dir=unblock_dir,
-            include_runtime=include_runtime,
+        report = (route_intersections.analyze_runtime_route_intersections(
             run_command=run_command,
-        )
+        ) if include_runtime else {'issues': []})
     service_item_ids = _service_item_id_set(service_items)
     route_entries = _read_all_routes(unblock_dir)
     pair_keys = set()

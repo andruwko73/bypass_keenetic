@@ -316,42 +316,43 @@ def _priority_overlap_is_protected(left_network, right_network, left_priority, r
     return False
 
 
+def _prepare_network_members(members):
+    """Parse and sort one snapshot once; callers own its lifetime."""
+    networks = {4: [], 6: []}
+    for value in members or ():
+        network = _ip_network(value)
+        if network:
+            networks[network.version].append((
+                int(network.network_address), int(network.broadcast_address), value, network,
+            ))
+    for items in networks.values():
+        items.sort(key=lambda item: (item[0], item[1], item[2]))
+    return networks
+
+
 def _network_overlap_samples(
-    left_members,
-    right_members,
-    *,
-    max_samples=8,
-    left_priority_members=None,
-    right_priority_members=None,
+    left_members, right_members, *, max_samples=8,
+    left_priority_members=None, right_priority_members=None,
 ):
-    left_networks = {4: [], 6: []}
-    right_networks = {4: [], 6: []}
-    left_priority = _priority_networks(left_priority_members)
-    right_priority = _priority_networks(right_priority_members)
-    for value in left_members or []:
-        network = _ip_network(value)
-        if network:
-            left_networks[network.version].append((
-                int(network.network_address),
-                int(network.broadcast_address),
-                value,
-                network,
-            ))
-    for value in right_members or []:
-        network = _ip_network(value)
-        if network:
-            right_networks[network.version].append((
-                int(network.network_address),
-                int(network.broadcast_address),
-                value,
-                network,
-            ))
+    if not left_members or not right_members:
+        return [], 0
+    return _prepared_network_overlap_samples(
+        _prepare_network_members(left_members), _prepare_network_members(right_members),
+        max_samples=max_samples,
+        left_priority=_priority_networks(left_priority_members),
+        right_priority=_priority_networks(right_priority_members),
+    )
+
+
+def _prepared_network_overlap_samples(
+    left_networks, right_networks, *, max_samples=8, left_priority, right_priority,
+):
     samples = []
     seen = set()
     match_count = 0
     for version in (4, 6):
-        left_items = sorted(left_networks[version], key=lambda item: (item[0], item[1], item[2]))
-        right_items = sorted(right_networks[version], key=lambda item: (item[0], item[1], item[2]))
+        left_items = left_networks[version]
+        right_items = right_networks[version]
         right_index = 0
         for left_start, left_end, left_value, left_network in left_items:
             while right_index < len(right_items) and right_items[right_index][1] < left_start:
@@ -502,6 +503,8 @@ def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subproces
         for kind, set_name in sets_by_kind.items():
             priority_members[(route, kind)] = members_by_set.get(set_name, set())
 
+    prepared = {}
+    prepared_priority = {}
     issues = []
     routes = list(ROUTE_IPSET_SETS)
     for index, route in enumerate(routes):
@@ -512,11 +515,19 @@ def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subproces
             ):
                 if kind != other_kind:
                     continue
-                samples, match_count = _network_overlap_samples(
-                    members_by_set.get(set_name, set()),
-                    members_by_set.get(other_set, set()),
-                    left_priority_members=priority_members.get((route, kind), set()),
-                    right_priority_members=priority_members.get((other_route, kind), set()),
+                if not members_by_set.get(set_name) or not members_by_set.get(other_set):
+                    continue
+                for name in (set_name, other_set):
+                    if name not in prepared:
+                        prepared[name] = _prepare_network_members(members_by_set[name])
+                for owner in (route, other_route):
+                    key = (owner, kind)
+                    if key not in prepared_priority:
+                        prepared_priority[key] = _priority_networks(priority_members.get(key))
+                samples, match_count = _prepared_network_overlap_samples(
+                    prepared[set_name], prepared[other_set],
+                    left_priority=prepared_priority[(route, kind)],
+                    right_priority=prepared_priority[(other_route, kind)],
                 )
                 if not match_count:
                     continue
@@ -537,6 +548,21 @@ def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subproces
                 if len(issues) >= max_issues:
                     return issues
     return issues
+
+
+def analyze_runtime_route_intersections(*, run_command=subprocess.run):
+    """Maintenance report independent of static/UI report limits.
+
+    Service attribution and overlap safety rules are shared with the full report.
+    Deletion callers still re-read current members before each cleanup pair.
+    """
+    issues = _runtime_ipset_intersections(run_command=run_command)
+    if issues:
+        service_index = _service_match_index()
+        match_cache = {}
+        for issue in issues:
+            _annotate_issue_services(issue, service_index, match_cache=match_cache)
+    return {'issues': issues, 'count': len(issues)}
 
 
 def analyze_route_intersections(

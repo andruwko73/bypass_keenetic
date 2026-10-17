@@ -419,7 +419,7 @@ run_refresh_if_check_due() {
 }
 
 youtube_route_protocol() {
-    [ -n "${YOUTUBE_ROUTE_PROTOCOL_CACHE:-}" ] && {
+    { [ "${YOUTUBE_ROUTE_PROTOCOL_CACHE_READY:-0}" = "1" ] || [ -n "${YOUTUBE_ROUTE_PROTOCOL_CACHE:-}" ]; } && {
         printf '%s\n' "$YOUTUBE_ROUTE_PROTOCOL_CACHE"
         return
     }
@@ -801,8 +801,14 @@ mark_runtime_dedupe_done() {
 
 apply_vless_priority_domain_ips_if_due() {
     priority_refresh_due || return 0
+    # Command substitutions cannot retain assignments in the parent shell.
+    # Resolve once for this due pass, never cache across scheduler cycles.
+    YOUTUBE_ROUTE_PROTOCOL_CACHE="$(youtube_route_protocol)"
+    YOUTUBE_ROUTE_PROTOCOL_CACHE_READY=1
     apply_vless_priority_domain_ips
     dedupe_vless_priority_overlaps
+    YOUTUBE_ROUTE_PROTOCOL_CACHE=""
+    YOUTUBE_ROUTE_PROTOCOL_CACHE_READY=0
     mark_priority_refresh_done
 }
 
