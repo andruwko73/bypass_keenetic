@@ -4,7 +4,7 @@ import subprocess
 import time
 from urllib.parse import urlparse
 
-from custom_check_policy import CUSTOM_TARGET_DENY_MARKERS
+from custom_check_policy import CUSTOM_TARGET_DENY_MARKERS, CHATGPT_DOTS_HOSTS, dots_pro_region_verdict
 
 
 TRANSIENT_STATUS_MARKERS = (
@@ -262,12 +262,51 @@ def _custom_target_denied(response):
     return any(marker in text for marker in CUSTOM_TARGET_DENY_MARKERS)
 
 
+def check_chatgpt_dots_region(proxy_url, connect_timeout=2, read_timeout=3):
+    """Check the country ChatGPT sees, without credentials or exporting trace/IP.
+
+    This verifies region eligibility for Pro, not account entitlement or rollout.
+    An unavailable/challenged/malformed trace is unknown, never a bad-key fact.
+    """
+    if not proxy_url:
+        return None, 'Dots Pro: прокси для проверки региона не задан.'
+    requests = _requests_module()
+    session = requests.Session()
+    session.trust_env = False
+    response = None
+    try:
+        response = session.get(
+            'https://chatgpt.com/cdn-cgi/trace',
+            proxies={'https': proxy_url, 'http': proxy_url},
+            timeout=(connect_timeout, read_timeout), stream=True,
+            allow_redirects=False,
+        )
+        if response.status_code != 200:
+            return None, 'Dots Pro: регион выхода не подтверждён.'
+        data = bytearray()
+        for chunk in response.iter_content(chunk_size=1024):
+            data.extend(chunk[:max(0, 4096 - len(data))])
+            if len(data) >= 4096:
+                break
+        return dots_pro_region_verdict(bytes(data))
+    except requests.exceptions.RequestException:
+        return None, 'Dots Pro: проверка региона временно недоступна.'
+    finally:
+        if response is not None:
+            response.close()
+        session.close()
+
+
 def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_timeout=2, read_timeout=3):
     requests = _requests_module()
     session = requests.Session()
     session.trust_env = False
     try:
         target_url = normalize_url(url)
+        if (urlparse(target_url).hostname or '').lower() in CHATGPT_DOTS_HOSTS:
+            eligible, message = check_chatgpt_dots_region(proxy_url, connect_timeout, read_timeout)
+            if eligible is not True:
+                return eligible, message
         response = session.get(
             target_url,
             timeout=(connect_timeout, read_timeout),
@@ -339,5 +378,5 @@ def probe_custom_targets(
             target_results.append(ok)
             if ok:
                 break
-        results[check_id] = any(target_results)
+        results[check_id] = True if any(target_results) else (None if None in target_results else False)
     return results

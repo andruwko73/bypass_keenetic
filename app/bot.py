@@ -1876,6 +1876,9 @@ def _confirm_telegram_failover_candidate(proto, _key_value):
 
 _failover_service_contracts = {}
 _failover_candidate_cursor = {}
+_chatgpt_failover_states = {}
+_chatgpt_failover_cursor = 0
+_chatgpt_failover_guard = threading.local()
 
 
 def _failover_service_log(message, service, proto=''):
@@ -1888,6 +1891,97 @@ def _current_failover_service_contracts():
     from failover_services import load_contracts
     return load_contracts(_load_custom_checks(), telegram_proto=_telegram_route_protocol(),
                           youtube_proto=_youtube_route_protocol())
+
+
+def _check_required_route(proto, key, contract, *, record=True):
+    return _find_pool_failover_candidate_in_process(
+        [(proto, key)], service='telegram', timeout_seconds=30,
+        service_contracts={proto: contract}, confirmation_proxy=proxy_settings.get(proto),
+        confirmation_verdict=True,
+        record_confirmation=record,
+    )
+
+
+def _attempt_chatgpt_route_failover():
+    global _chatgpt_failover_cursor
+    from failover_services import required_route_recovery
+    if (not _app_mode_pool_enabled() or _update_maintenance_active()
+            or _key_apply_maintenance_active() or not _post_apply_ready()):
+        return False
+    if not pool_apply_lock.acquire(blocking=False):
+        return False
+    try:
+        contracts = _current_failover_service_contracts()
+        current = _load_current_keys()
+        items = list(contracts.items())
+        offset = _chatgpt_failover_cursor % max(1, len(items))
+        for index in range(len(items)):
+            proto, contract = items[(offset + index) % len(items)]
+            if not any(c['id'] == 'chatgpt_services' for c in contract['custom']):
+                _chatgpt_failover_states.pop(proto, None)
+                continue
+            key = str(current.get(proto) or '').strip()
+            if not key or not proxy_settings.get(proto):
+                continue
+            state = _chatgpt_failover_states.setdefault(proto, {})
+            if time.time() < state.get('retry_at', 0) and state.get('identity') == (_hash_key(key), contract['revision']):
+                continue
+            _chatgpt_failover_cursor = (offset + index + 1) % len(items)
+
+            def valid(candidate):
+                return (_post_apply_current_matches(proto, key)
+                        and _current_failover_service_contracts()[proto]['revision'] == contract['revision']
+                        and _failover_candidate_still_valid(proto, candidate[1], 'telegram'))
+
+            def select():
+                if proto in YOUTUBE_STREAM_GUARD_PROTOCOLS and _vless_traffic_guard_active(
+                        'ChatGPT / Codex auto-failover',
+                        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS):
+                    return None
+                candidates = _key_pool_store().failover_candidates(
+                    _load_key_pools(), proto, key, protocols=(proto,),
+                    key_probe_cache=_load_key_probe_cache(), hash_key=_hash_key, service='telegram')
+                other_active = {v for p, v in current.items() if p != proto and v}
+                candidates = _automatic_hot_candidates([(p, k) for p, k in candidates if k not in other_active])
+                return _find_pool_failover_candidate(candidates, service='telegram', timeout_seconds=45)
+
+            def apply(candidate):
+                _chatgpt_failover_guard.expected = (proto, candidate[1], contract['revision'])
+                try:
+                    _install_key_for_protocol(proto, candidate[1], automatic=True, require_health=True)
+                finally:
+                    _chatgpt_failover_guard.expected = None
+                _audit_key_switch('chatgpt_auto_failover', proto, candidate[1], 'Telegram + ChatGPT/Codex; Dots Pro region confirmed')
+                _invalidate_web_status_cache()
+                _invalidate_key_status_cache()
+
+            switched = required_route_recovery(
+                state, (_hash_key(key), contract['revision']),
+                check_active=lambda: _check_required_route(proto, key, contract),
+                select_candidate=select, still_valid=valid, apply_candidate=apply, now=time.time())
+            # At most one route per cycle: short workers and bounded router load.
+            return switched
+        return False
+    finally:
+        pool_apply_lock.release()
+
+
+def _run_chatgpt_failover_cycle():
+    if not _app_mode_pool_enabled() or int(_mem_available_kb_light() or 0) < 65536:
+        return False
+    if not any(any(c['id'] == 'chatgpt_services' for c in contract['custom'])
+               for contract in _current_failover_service_contracts().values()):
+        return False
+    if not _background_task_allowed('ChatGPT / Codex auto-failover',
+                                    ignore_bot_rss=True, max_program_rss_kb=0):
+        return False
+    ran = False
+    try:
+        ran, result = _run_coordinated_background_task('ChatGPT / Codex failover', _attempt_chatgpt_route_failover)
+        return bool(ran and result)
+    finally:
+        if ran:
+            _memory_cleanup('ChatGPT / Codex failover cycle', clear_status=False, log=False)
 
 
 def _failover_candidate_still_valid(proto, key_value, service='telegram'):
@@ -12295,6 +12389,8 @@ def _find_pool_failover_candidate_in_process(
     timeout_seconds=None,
     service_contracts=None,
     confirmation_proxy=None,
+    confirmation_verdict=False,
+    record_confirmation=True,
 ):
     candidates = [
         (str(proto or ''), str(key_value or '').strip())
@@ -12312,6 +12408,8 @@ def _find_pool_failover_candidate_in_process(
         'service': str(service or 'telegram'),
         'service_contracts': service_contracts,
         'confirmation_proxy': confirmation_proxy,
+        'confirmation_verdict': bool(confirmation_verdict),
+        'record_confirmation': bool(record_confirmation),
         'budget_seconds': max(1, min(120, float(timeout_seconds or 60)) - 2),
         'candidates': candidates,
         'batch_size': POOL_PROBE_BATCH_SIZE,
@@ -12364,6 +12462,9 @@ def _find_pool_failover_candidate_in_process(
             else:
                 _write_runtime_log(f'Auto-failover: worker returned code {result.returncode} while checking candidates.')
             return None
+        if confirmation_verdict:
+            verdict = worker_payload.get('confirmation_verdict')
+            return verdict if type(verdict) is bool else None
         candidate = worker_payload.get('candidate')
         if not worker_payload.get('ok') or not isinstance(candidate, list) or len(candidate) < 4:
             return None
@@ -14352,6 +14453,7 @@ def _background_maintenance_tasks():
             _run_subscription_auto_refresh_cycle,
         ))
     tasks.append(('Telegram auto-failover', AUTO_FAILOVER_POLL_SECONDS, 0.0, _run_auto_failover_cycle))
+    tasks.append(('ChatGPT / Codex auto-failover', 60.0, 120.0, _run_chatgpt_failover_cycle))
     return tasks
 
 
@@ -16839,6 +16941,16 @@ def _live_key_required_services(proto):
 
 
 def _live_key_data_check(proto, key):
+    contract = _current_failover_service_contracts().get(proto, {})
+    expected = getattr(_chatgpt_failover_guard, 'expected', None)
+    if expected and expected != (proto, key, contract.get('revision')):
+        return False
+    if any(c['id'] == 'chatgpt_services' for c in contract.get('custom', [])):
+        if expected and key not in (_load_key_pools().get(proto) or []):
+            return False
+        verified = _check_required_route(proto, key, contract, record=False) is True
+        latest = _current_failover_service_contracts().get(proto, {})
+        return verified and latest.get('revision') == contract['revision']
     # No cache write before runtime and disk commit. The normal post-apply
     # worker records results after its generation/identity check.
     result = _check_pool_key_through_proxy(
@@ -17027,7 +17139,7 @@ def _initialize_proxy_apply_control():
     install_proxy_controls(
         globals(), control,
         manual=('_apply_manual_key_safely', '_delete_pool_key', '_clear_pool'),
-        background=('_attempt_auto_failover', '_attempt_youtube_failover'),
+        background=('_attempt_auto_failover', '_attempt_youtube_failover', '_attempt_chatgpt_route_failover'),
         recoveries={
             '_recover_interrupted_youtube_failover_transaction': lambda: os.path.exists(YOUTUBE_FAILOVER_TRANSACTION_FILE),
             '_recover_interrupted_telegram_failover_transaction': lambda: os.path.exists(TELEGRAM_FAILOVER_TRANSACTION_FILE),

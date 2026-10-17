@@ -109,12 +109,15 @@ def run_failover_candidate_worker(input_path, result_path):
         if payload.get('confirmation_proxy'):
             proto, key_value = _as_candidates(payload)[0]
             verdict, rejected, values = check_required(
-                payload['confirmation_proxy'], contracts[proto], primary=service,
+                payload['confirmation_proxy'], contracts[proto],
+                primary='' if payload.get('confirmation_verdict') else service,
                 check_telegram=_telegram_check(payload.get('telegram_authenticated')),
                 check_http=check_http_through_proxy, check_custom=_check_custom,
                 timeouts=http_timeouts, deadline=deadline,
             )
-            record_required(record_key_probe, proto, key_value, contracts[proto], values, kind='runtime')
+            if payload.get('record_confirmation', True):
+                record_required(record_key_probe, proto, key_value, contracts[proto], values, kind='runtime')
+            result['confirmation_verdict'] = verdict
             if verdict is not True:
                 log(f'Auto-failover: постоянная проверка сервиса {service_label(rejected)}: '
                     + ('недоступна.' if verdict is None else 'неуспешна.'))

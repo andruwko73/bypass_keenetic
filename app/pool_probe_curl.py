@@ -7,7 +7,8 @@ import tempfile
 import time
 from urllib.parse import urlparse
 
-from custom_check_policy import CUSTOM_TARGET_DENY_MARKERS
+from custom_check_policy import (CUSTOM_TARGET_DENY_MARKERS, CHATGPT_DOTS_HOSTS,
+                                 DOTS_TRACE_URL, dots_pro_region_verdict)
 
 
 CURL_BINARY = '/opt/bin/curl'
@@ -130,6 +131,13 @@ def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_tim
         target_url = normalize_url(url)
     except ValueError as exc:
         return False, str(exc)
+    if (urlparse(target_url).hostname or '').lower() in CHATGPT_DOTS_HOSTS:
+        status, final, trace, error = _run_curl(proxy_url, DOTS_TRACE_URL, connect_timeout, read_timeout)
+        if error or status != 200 or final != DOTS_TRACE_URL:
+            return None, 'Dots Pro: регион выхода не подтверждён.'
+        eligible, message = dots_pro_region_verdict(trace)
+        if eligible is not True:
+            return eligible, message
     status_code, final_url, body, error = _run_curl(
         proxy_url,
         target_url,

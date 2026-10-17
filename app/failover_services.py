@@ -62,6 +62,10 @@ def build_contracts(checks, routes, *, telegram_proto='', youtube_proto=''):
             if selected:
                 item = dict(check, url=selected[0], urls=selected)
                 result[proto]['custom'].append(item)
+                if check['id'] == 'chatgpt_services':
+                    # ChatGPT/Dots candidates must also carry Telegram even
+                    # when the user's Telegram route belongs to another proto.
+                    result[proto]['telegram'] = True
     revision = signature({'checks': checks, 'routes': {p: sorted(v) for p, v in routes.items()},
                           'telegram': telegram_proto, 'youtube': youtube_proto})
     for contract in result.values():
@@ -69,6 +73,35 @@ def build_contracts(checks, routes, *, telegram_proto='', youtube_proto=''):
         contract['legacy_signature'] = custom_checks_signature(checks)
         contract['legacy_checks'] = {c['id']: check_signature(c) for c in checks}
     return result
+
+
+def required_route_recovery(state, identity, *, check_active, select_candidate,
+                            still_valid, apply_candidate, now, cooldown=300):
+    """Bounded independent recovery; unknown evidence never triggers a switch.
+
+    The injected apply operation must verify and persist atomically or roll back.
+    A changed active key/route invalidates consecutive failures and cooldowns.
+    """
+    if state.get('identity') != identity:
+        state.clear()
+        state.update(identity=identity, failures=0, retry_at=0)
+    if now < state.get('retry_at', 0):
+        return False
+    state['retry_at'] = now + 60
+    verdict = check_active()
+    if verdict is not False:
+        state['failures'] = 0
+        return False
+    state['failures'] += 1
+    if state['failures'] < 2:
+        return False
+    state['retry_at'] = now + cooldown
+    candidate = select_candidate()
+    if not candidate or not still_valid(candidate):
+        return False
+    apply_candidate(candidate)
+    state['failures'] = 0
+    return True
 
 
 def load_contracts(checks, *, telegram_proto='', youtube_proto='', unblock_dir='/opt/etc/unblock'):

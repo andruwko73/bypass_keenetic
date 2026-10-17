@@ -14668,7 +14668,14 @@ def test_proxy_status_runtime_helpers():
             def close(self):
                 pass
 
-        responses = iter([_ForbiddenResponse(), _RegionPageResponse(), _AuthResponse()])
+        class _DotsTraceResponse:
+            status_code = 200
+            def iter_content(self, chunk_size=4096):
+                return iter([b'h=chatgpt.com\nloc=US\n'])
+            def close(self):
+                pass
+
+        responses = iter([_DotsTraceResponse(), _ForbiddenResponse(), _RegionPageResponse(), _AuthResponse()])
         _Session.get = lambda self, *args, **kwargs: next(responses)
         ok, _ = proxy_status.check_custom_target_through_proxy(lambda value: value, 'proxy', 'https://api.openai.com/v1/models')
         assert ok is False
