@@ -16,6 +16,7 @@ import proxy_status
 from protocol_catalog import PROTOCOL_DISPLAY_ORDER
 from test_failover_services import bot_function
 import threading
+import re
 
 
 @pytest.mark.parametrize('country', sorted(region.DOTS_PRO_EXCLUDED_REGIONS | {'RU', 'CN', 'BY', 'IR'}))
@@ -169,3 +170,17 @@ def test_permanent_probe_rejects_unknown_and_concurrent_route_changes(mode):
         '_check_required_route': check}
     verify = bot_function('_live_key_data_check', env)
     assert verify('vless', 'candidate') is False
+
+
+def test_chatgpt_recovery_is_audited_as_automatic_with_its_own_service(tmp_path):
+    import os, time
+    events=[]
+    env={'_hash_key': lambda key:'synthetic-id', '_pool_key_display_name':lambda key:'Synthetic',
+        '_redact_sensitive_text':str, 're':re, 'os':os, 'time':time,
+        'KEY_SWITCH_AUDIT_LOG':str(tmp_path/'audit.log'),
+        '_record_event':lambda **kw:events.append(kw)}
+    audit=bot_function('_audit_key_switch',env)
+    audit('chatgpt_auto_failover','vless','fixture','qualified Pro region')
+    assert events[0]['action']=='key_switch_auto'
+    assert events[0]['service']=='chatgpt_services'
+    assert events[0]['details']['mode']=='automatic'

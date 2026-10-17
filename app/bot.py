@@ -4608,8 +4608,9 @@ def _audit_key_switch(source, proto, key_value, reason='', *, confirmation='', a
     except Exception:
         pass
     source = str(source or 'system').strip()
-    auto_source = source in ('youtube_auto_failover', 'telegram_auto_failover', 'auto_failover')
-    service = 'youtube' if source == 'youtube_auto_failover' else ('telegram' if auto_source else '')
+    auto_source = source in ('youtube_auto_failover', 'telegram_auto_failover', 'auto_failover', 'chatgpt_auto_failover')
+    service = ('chatgpt_services' if source == 'chatgpt_auto_failover' else
+               'youtube' if source == 'youtube_auto_failover' else ('telegram' if auto_source else ''))
     message = f'Автоматически выбран ключ: {display_name}' if auto_source else display_name
     if reason:
         message = f'{message}. Причина: {reason}'
