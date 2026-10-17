@@ -1,3 +1,4 @@
+import errno
 import json
 from pathlib import Path
 import subprocess
@@ -70,10 +71,25 @@ def test_wire_rejects_cname_crossing_record_boundary():
 
 @pytest.mark.parametrize('tcp_fallback', [False, True])
 def test_real_loopback_dns_transport_and_tcp_fallback(tcp_fallback):
-    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp.bind(('127.0.0.1', 0)); port = udp.getsockname()[1]; udp.settimeout(3)
-    tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp.bind(('127.0.0.1', port)); tcp.listen(1); tcp.settimeout(3)
+    # UDP port 0 does not reserve the same TCP port. Reserve both protocols
+    # before starting the server; retry only genuine cross-protocol collisions.
+    for attempt in range(20):
+        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            tcp.bind(('127.0.0.1', 0))
+            port = tcp.getsockname()[1]
+            udp.bind(('127.0.0.1', port))
+            tcp.listen(1)
+        except OSError as exc:
+            tcp.close()
+            udp.close()
+            if exc.errno != errno.EADDRINUSE or attempt == 19:
+                raise
+        else:
+            break
+    udp.settimeout(3)
+    tcp.settimeout(3)
     errors = []
     def serve():
         try:
