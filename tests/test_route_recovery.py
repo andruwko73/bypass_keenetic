@@ -194,3 +194,37 @@ def test_manual_choice_discards_old_series_and_holds_automatic_recovery():
     reset('vmess','manual')
     assert env['_chatgpt_failover_states']=={}
     assert gate.deferred('vmess',399) and not gate.deferred('vmess',400)
+
+
+def test_six_assigned_routes_finish_confirmation_without_starvation():
+    clock=[100]; applied=[]; checked=[]
+    current={p:p+'-old' for p in PROTOCOLS}
+    contracts=policy.build_contracts([{'id':'chatgpt_services','url':'https://chat.example.invalid'}],
+                                    {p:['chat.example.invalid'] for p in PROTOCOLS})
+    def check(proto,key,contract,**kw):
+        checked.append((proto,clock[0]))
+        return {'verdict':not key.endswith('-old'),'service':'chatgpt_services'}
+    def install(proto,key,**kw):
+        current[proto]=key; applied.append(proto)
+    env={'time':SimpleNamespace(time=lambda:clock[0]),'_chatgpt_failover_cursor':0,
+         '_chatgpt_failover_states':{},'_chatgpt_failover_guard':threading.local(),
+         '_app_mode_pool_enabled':lambda:True,'_update_maintenance_active':lambda:False,
+         '_key_apply_maintenance_active':lambda:False,'_post_apply_ready':lambda:True,
+         'pool_apply_lock':threading.RLock(),'_current_failover_service_contracts':lambda:contracts,
+         '_load_current_keys':lambda:dict(current),'_hash_key':str,'proxy_settings':dict(current),
+         '_check_required_route':check,'_post_apply_current_matches':lambda p,k:current[p]==k,
+         '_failover_candidate_still_valid':lambda *a:True,
+         '_key_pool_store':lambda:SimpleNamespace(failover_candidates=lambda pools,p,key,**kw:[(p,p+'-new')]),
+         '_load_key_pools':lambda:{},'_load_key_probe_cache':lambda:{},
+         '_automatic_hot_candidates':lambda c:c,'_find_pool_failover_candidate':lambda c,**kw:(*c[0],None,None),
+         'YOUTUBE_STREAM_GUARD_PROTOCOLS':PROTOCOLS,'YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS':60,
+         '_youtube_stream_guard_active':lambda *a,**kw:False,'_install_key_for_protocol':install,
+         '_audit_key_switch':lambda *a,**kw:None,'_invalidate_web_status_cache':lambda:None,
+         '_invalidate_key_status_cache':lambda:None,'_write_runtime_log':lambda *a:None}
+    run=bot_function('_attempt_chatgpt_route_failover',env)
+    for i in range(18):
+        clock[0]=100+i*60;run()
+    assert set(applied)==set(PROTOCOLS) and len(applied)==6
+    for proto in PROTOCOLS:
+        times=[t for p,t in checked if p==proto]
+        assert len(times)==3 and times[-1]-times[0]<=300

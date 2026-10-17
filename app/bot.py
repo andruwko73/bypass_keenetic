@@ -1932,8 +1932,13 @@ def _attempt_chatgpt_route_failover():
         current = _load_current_keys()
         items = list(contracts.items())
         offset = _chatgpt_failover_cursor % max(1, len(items))
+        items = items[offset:] + items[:offset]
+        # Finish a pending confirmation within its five-minute window even
+        # when ChatGPT is assigned to all six routes. Cooldowns still allow
+        # other routes to progress and there is only one worker per cycle.
+        items.sort(key=lambda item: not bool(_chatgpt_failover_states.get(item[0], {}).get('failures')))
         for index in range(len(items)):
-            proto, contract = items[(offset + index) % len(items)]
+            proto, contract = items[index]
             if not any(c['id'] == 'chatgpt_services' for c in contract['custom']):
                 _chatgpt_failover_states.pop(proto, None)
                 continue
@@ -1945,7 +1950,7 @@ def _attempt_chatgpt_route_failover():
             state = _chatgpt_failover_states.setdefault(proto, {})
             if time.time() < state.get('retry_at', 0) and state.get('identity') == (_hash_key(key), contract['revision']):
                 continue
-            _chatgpt_failover_cursor = (offset + index + 1) % len(items)
+            _chatgpt_failover_cursor = (list(contracts).index(proto) + 1) % len(items)
 
             def valid(candidate):
                 return (_post_apply_current_matches(proto, key)
