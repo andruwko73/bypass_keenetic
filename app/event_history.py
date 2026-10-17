@@ -22,6 +22,14 @@ TECHNICAL_RECOVERY_ACTIONS = frozenset({
     'auto_failover_skip', 'auto_failover_switch', 'auto_failover_guard_bypass',
     'stream_guard_defer',
 })
+RECOVERY_RESTORE_SOURCES = frozenset({'youtube_failover_restore', 'telegram_failover_restore'})
+
+
+def _technical_recovery_event(action, source):
+    return (action in TECHNICAL_RECOVERY_ACTIONS
+            or action in NEVER_DEDUPLICATE_ACTIONS and source in RECOVERY_RESTORE_SOURCES)
+
+
 DISPLAY_COMPACT_ACTIONS = frozenset({
     'stream_guard_defer',
     'udp_quic_drift_fast_add',
@@ -170,7 +178,7 @@ def _trim_history(path, max_events, *, force=False):
             item = json.loads(line)
         except (ValueError, TypeError):
             continue
-        if isinstance(item, dict) and item.get('action') not in TECHNICAL_RECOVERY_ACTIONS:
+        if isinstance(item, dict) and not _technical_recovery_event(item.get('action'), item.get('source')):
             retained.append(line)
     if len(retained) == len(lines) and len(lines) <= max_events:
         return
@@ -205,7 +213,7 @@ def record_event(
 ):
     path = _event_path(event_path)
     action_text = _limit_text(action, 80)
-    if action_text in TECHNICAL_RECOVERY_ACTIONS:
+    if _technical_recovery_event(action_text, source):
         return True
     redact_ip = _action_redacts_ip(action_text)
     event = {
@@ -294,7 +302,7 @@ def load_events(limit=50, *, event_path=None):
                     item = json.loads(line)
                 except (ValueError, TypeError):
                     continue
-                if isinstance(item, dict) and item.get('action') not in TECHNICAL_RECOVERY_ACTIONS:
+                if isinstance(item, dict) and not _technical_recovery_event(item.get('action'), item.get('source')):
                     lines.append(line.strip())
     except Exception:
         return []

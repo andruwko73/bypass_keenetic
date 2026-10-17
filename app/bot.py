@@ -4657,11 +4657,12 @@ def _audit_key_switch(source, proto, key_value, reason='', *, confirmation='', a
     except Exception:
         pass
     source = str(source or 'system').strip()
-    auto_source = source in ('youtube_auto_failover', 'telegram_auto_failover', 'auto_failover', 'chatgpt_auto_failover')
+    auto_source = source in ('youtube_auto_failover', 'telegram_auto_failover', 'auto_failover', 'chatgpt_auto_failover',
+                             'youtube_auto_failover_recovery', 'telegram_auto_failover_recovery')
     if auto_source:
         _route_recovery_gate.committed(proto, time.time())
     service = ('chatgpt_services' if source == 'chatgpt_auto_failover' else
-               'youtube' if source == 'youtube_auto_failover' else ('telegram' if auto_source else ''))
+               'youtube' if source in ('youtube_auto_failover', 'youtube_auto_failover_recovery') else ('telegram' if auto_source else ''))
     if source == 'chatgpt_auto_failover' and trigger:
         service = trigger
     message = f'Автоматически выбран ключ: {display_name}' if auto_source else display_name

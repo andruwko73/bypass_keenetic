@@ -145,6 +145,7 @@ def test_five_commits_and_hundreds_of_checks_keep_exactly_five_history_rows(tmp_
         event_history.record_event(action='key_switch_auto', key_hash=str(index), event_path=path)
         for _ in range(150):
             event_history.record_event(action='failover_service_check', event_path=path)
+            event_history.record_event(action='key_switch', source='youtube_failover_restore', event_path=path)
     rows=event_history.load_events(120,event_path=path)
     assert len(rows)==5 and {e['key_hash'] for e in rows}==set(map(str,range(5)))
     assert len(Path(path).read_text().splitlines())==5
