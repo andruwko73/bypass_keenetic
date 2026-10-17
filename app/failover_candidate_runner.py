@@ -84,7 +84,7 @@ def run_failover_candidate_worker(input_path, result_path):
     if not isinstance(payload, dict):
         payload = {}
     service = str(payload.get('service') or 'telegram').strip().lower()
-    if service not in ('telegram', 'youtube'):
+    if service not in ('telegram', 'youtube', 'route'):
         service = 'telegram'
     result = {
         'ok': False,
@@ -118,6 +118,7 @@ def run_failover_candidate_worker(input_path, result_path):
             if payload.get('record_confirmation', True):
                 record_required(record_key_probe, proto, key_value, contracts[proto], values, kind='runtime')
             result['confirmation_verdict'] = verdict
+            result['confirmation_service'] = rejected
             if verdict is not True:
                 log(f'Auto-failover: постоянная проверка сервиса {service_label(rejected)}: '
                     + ('недоступна.' if verdict is None else 'неуспешна.'))

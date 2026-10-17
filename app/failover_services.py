@@ -2,6 +2,7 @@
 import hashlib
 import json
 import time
+import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -62,10 +63,6 @@ def build_contracts(checks, routes, *, telegram_proto='', youtube_proto=''):
             if selected:
                 item = dict(check, url=selected[0], urls=selected)
                 result[proto]['custom'].append(item)
-                if check['id'] == 'chatgpt_services':
-                    # ChatGPT/Dots candidates must also carry Telegram even
-                    # when the user's Telegram route belongs to another proto.
-                    result[proto]['telegram'] = True
     revision = signature({'checks': checks, 'routes': {p: sorted(v) for p, v in routes.items()},
                           'telegram': telegram_proto, 'youtube': youtube_proto})
     for contract in result.values():
@@ -80,28 +77,71 @@ def required_route_recovery(state, identity, *, check_active, select_candidate,
     """Bounded independent recovery; unknown evidence never triggers a switch.
 
     The injected apply operation must verify and persist atomically or roll back.
-    A changed active key/route invalidates consecutive failures and cooldowns.
+    A changed key/route invalidates failures, but never the route cooldown.
     """
     if state.get('identity') != identity:
+        hold = state.get('cooldown_until', 0)
         state.clear()
-        state.update(identity=identity, failures=0, retry_at=0)
+        state.update(identity=identity, failures=0, retry_at=hold, cooldown_until=hold)
     if now < state.get('retry_at', 0):
         return False
     state['retry_at'] = now + 60
-    verdict = check_active()
+    evidence = check_active()
+    verdict = evidence.get('verdict') if isinstance(evidence, dict) else evidence
+    service = evidence.get('service', '') if isinstance(evidence, dict) else 'route'
     if verdict is not False:
         state['failures'] = 0
+        state['failure_service'] = ''
         return False
+    if (state.get('failure_service') != service
+            or now - state.get('first_failure_at', now) > 300):
+        state.update(failures=0, first_failure_at=now, failure_service=service)
     state['failures'] += 1
-    if state['failures'] < 2:
+    if state['failures'] < 3:
         return False
-    state['retry_at'] = now + cooldown
+    state['retry_at'] = state['cooldown_until'] = now + cooldown
     candidate = select_candidate()
     if not candidate or not still_valid(candidate):
         return False
     apply_candidate(candidate)
     state['failures'] = 0
     return True
+
+
+class RouteRecoveryGate:
+    """One bounded, process-local recovery budget shared by all watchdogs.
+
+    The host serializes apply operations. Reserve only after taking its lock;
+    completion extends the hold from actual commit, regardless of key identity.
+    """
+    def __init__(self, cooldown=300):
+        self.cooldown = max(300, cooldown)
+        self._routes = {}
+        self._rejected = {}
+        self._lock = threading.RLock()
+
+    def deferred(self, proto, now, *, reserve=False):
+        with self._lock:
+            if now < self._routes.get(proto, 0):
+                return True
+            if reserve:
+                self._routes[proto] = now + self.cooldown
+            return False
+
+    def committed(self, proto, now):
+        with self._lock:
+            self._routes[proto] = now + self.cooldown
+
+    def reject(self, proto, key_id, now):
+        with self._lock:
+            self._rejected = {k: until for k, until in self._rejected.items() if until > now}
+            if len(self._rejected) >= 48:
+                self._rejected.pop(next(iter(self._rejected)))
+            self._rejected[(proto, key_id)] = now + 2 * self.cooldown
+
+    def eligible(self, proto, key_id, now):
+        with self._lock:
+            return now >= self._rejected.get((proto, key_id), 0)
 
 
 def load_contracts(checks, *, telegram_proto='', youtube_proto='', unblock_dir='/opt/etc/unblock'):

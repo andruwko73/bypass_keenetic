@@ -1619,7 +1619,8 @@ def _automatic_hot_candidates(candidates):
         return []
     current = _logical_proxy_config()
     return [(proto, key) for proto, key in candidates
-            if backend.apply_requirement(proto, current=current, desired=_logical_proxy_config({proto: key}))
+            if _route_recovery_gate.eligible(proto, _hash_key(key), time.time())
+            and backend.apply_requirement(proto, current=current, desired=_logical_proxy_config({proto: key}))
             is not ApplyRequirement.COMMON_CORE_RESTART]
 
 
@@ -1879,12 +1880,27 @@ _failover_candidate_cursor = {}
 _chatgpt_failover_states = {}
 _chatgpt_failover_cursor = 0
 _chatgpt_failover_guard = threading.local()
+from failover_services import RouteRecoveryGate
+_route_recovery_gate = RouteRecoveryGate()
+_failover_log_times = {}
+
+
+def _automatic_route_recovery_deferred(proto, *, reserve=False):
+    return _route_recovery_gate.deferred(proto, time.time(), reserve=reserve)
+
 
 
 def _failover_service_log(message, service, proto=''):
+    # Diagnostics belong to the bounded runtime log, never action history.
+    # Bound the fingerprint map too; it contains no keys or endpoint responses.
+    key = (str(service), str(proto), str(message))
+    now = time.time()
+    if now - _failover_log_times.get(key, -300) < 300:
+        return
+    if len(_failover_log_times) >= 128:
+        _failover_log_times.pop(next(iter(_failover_log_times)))
+    _failover_log_times[key] = now
     _write_runtime_log(message)
-    _record_event('failover_service_check', message, source='watchdog', protocol=proto,
-                  service=service, details={'required_services': True})
 
 
 def _current_failover_service_contracts():
@@ -1893,18 +1909,19 @@ def _current_failover_service_contracts():
                           youtube_proto=_youtube_route_protocol())
 
 
-def _check_required_route(proto, key, contract, *, record=True):
+def _check_required_route(proto, key, contract, *, record=True, detailed=False):
     return _find_pool_failover_candidate_in_process(
-        [(proto, key)], service='telegram', timeout_seconds=30,
+        [(proto, key)], service='route', timeout_seconds=30,
         service_contracts={proto: contract}, confirmation_proxy=proxy_settings.get(proto),
         confirmation_verdict=True,
+        confirmation_details=detailed,
         record_confirmation=record,
     )
 
 
 def _attempt_chatgpt_route_failover():
     global _chatgpt_failover_cursor
-    from failover_services import required_route_recovery
+    from failover_services import required_route_recovery, service_label
     if (not _app_mode_pool_enabled() or _update_maintenance_active()
             or _key_apply_maintenance_active() or not _post_apply_ready()):
         return False
@@ -1920,6 +1937,8 @@ def _attempt_chatgpt_route_failover():
             if not any(c['id'] == 'chatgpt_services' for c in contract['custom']):
                 _chatgpt_failover_states.pop(proto, None)
                 continue
+            if _automatic_route_recovery_deferred(proto):
+                continue
             key = str(current.get(proto) or '').strip()
             if not key or not proxy_settings.get(proto):
                 continue
@@ -1931,9 +1950,12 @@ def _attempt_chatgpt_route_failover():
             def valid(candidate):
                 return (_post_apply_current_matches(proto, key)
                         and _current_failover_service_contracts()[proto]['revision'] == contract['revision']
-                        and _failover_candidate_still_valid(proto, candidate[1], 'telegram'))
+                        and _failover_candidate_still_valid(proto, candidate[1], 'route'))
 
             def select():
+                if _automatic_route_recovery_deferred(proto, reserve=True):
+                    return None
+                _route_recovery_gate.reject(proto, _hash_key(key), time.time())
                 if proto in YOUTUBE_STREAM_GUARD_PROTOCOLS and _youtube_stream_guard_active(
                         proto, reason='ChatGPT / Codex auto-failover', log=True,
                         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
@@ -1941,10 +1963,10 @@ def _attempt_chatgpt_route_failover():
                     return None
                 candidates = _key_pool_store().failover_candidates(
                     _load_key_pools(), proto, key, protocols=(proto,),
-                    key_probe_cache=_load_key_probe_cache(), hash_key=_hash_key, service='telegram')
+                    key_probe_cache=_load_key_probe_cache(), hash_key=_hash_key, service='route')
                 other_active = {v for p, v in current.items() if p != proto and v}
                 candidates = _automatic_hot_candidates([(p, k) for p, k in candidates if k not in other_active])
-                return _find_pool_failover_candidate(candidates, service='telegram', timeout_seconds=45)
+                return _find_pool_failover_candidate(candidates, service='route', timeout_seconds=45)
 
             def apply(candidate):
                 _chatgpt_failover_guard.expected = (proto, candidate[1], contract['revision'])
@@ -1952,13 +1974,22 @@ def _attempt_chatgpt_route_failover():
                     _install_key_for_protocol(proto, candidate[1], automatic=True, require_health=True)
                 finally:
                     _chatgpt_failover_guard.expected = None
-                _audit_key_switch('chatgpt_auto_failover', proto, candidate[1], 'Telegram + ChatGPT/Codex; Dots Pro region confirmed')
-                _invalidate_web_status_cache()
-                _invalidate_key_status_cache()
+                # The committed route owns its cooldown even if bookkeeping fails.
+                _route_recovery_gate.committed(proto, time.time())
+                failed = state.get('failure_service') or 'chatgpt_services'
+                source = {'telegram': 'telegram_auto_failover', 'youtube': 'youtube_auto_failover'}.get(
+                    failed, 'chatgpt_auto_failover')
+                try:
+                    _audit_key_switch(source, proto, candidate[1],
+                                      'Подтверждённый отказ: ' + service_label(failed), trigger=failed)
+                    _invalidate_web_status_cache()
+                    _invalidate_key_status_cache()
+                except Exception as exc:
+                    _write_runtime_log('Committed route recovery bookkeeping deferred: ' + type(exc).__name__)
 
             switched = required_route_recovery(
                 state, (_hash_key(key), contract['revision']),
-                check_active=lambda: _check_required_route(proto, key, contract),
+                check_active=lambda: _check_required_route(proto, key, contract, detailed=True),
                 select_candidate=select, still_valid=valid, apply_candidate=apply, now=time.time())
             # At most one route per cycle: short workers and bounded router load.
             return switched
@@ -2019,7 +2050,7 @@ def _attempt_auto_failover():
     if callable(maintenance) and maintenance():
         return False
     telegram_route_proto = _telegram_route_protocol()
-    if not telegram_route_proto:
+    if not telegram_route_proto or _automatic_route_recovery_deferred(telegram_route_proto):
         return False
     if _app_mode_telegram_enabled() and bot_polling and not _auto_failover_has_pending_failure():
         _mark_auto_failover_polling_ok()
@@ -2058,7 +2089,12 @@ def _attempt_auto_failover():
                 return False
 
         service_deadline = time.time() + 120
+        recovery_reserved = False
         def select_service_candidate(candidates, service='telegram'):
+            nonlocal recovery_reserved
+            if not recovery_reserved and _automatic_route_recovery_deferred(telegram_route_proto, reserve=True):
+                return None
+            recovery_reserved = True
             candidates = _automatic_hot_candidates(candidates)
             if not candidates:
                 auto_failover_state['deferred_reason'] = 'Для смены транспорта нужен общий перезапуск Xray; примените ключ вручную.'
@@ -2108,6 +2144,8 @@ def _attempt_auto_failover():
             update_switch_transaction=_update_telegram_failover_transaction,
             clear_switch_transaction=_clear_telegram_failover_transaction,
         )
+        if switched:
+            _route_recovery_gate.committed(telegram_route_proto, time.time())
         _restore_telegram_polling_after_verified_recovery()
         return switched
     finally:
@@ -2998,6 +3036,8 @@ def _switch_youtube_to_verified_candidate(
     current_score=0,
 ):
     from proxy_apply_result import AutomaticApplyBlocked
+    if _automatic_route_recovery_deferred(route_proto):
+        return False
     now = time.time()
     failure_deadline = float(state.get('failure_deadline') or 0.0) if trigger == 'failed' else 0.0
     if trigger == 'failed' and _youtube_failover_policy().remaining_seconds(failure_deadline, now=now) <= 0:
@@ -3011,6 +3051,8 @@ def _switch_youtube_to_verified_candidate(
         state['deferred_reason'] = 'измерение качества отложено из-за доступной памяти'
         return False
 
+    if _automatic_route_recovery_deferred(route_proto, reserve=True):
+        return False
     pools = _load_key_pools()
     probe_cache = _load_key_probe_cache()
     candidates = _key_pool_store().failover_candidates(
@@ -3373,6 +3415,7 @@ def _switch_youtube_to_verified_candidate(
             finally:
                 pool_apply_lock.release()
             committed = True
+            _route_recovery_gate.committed(route_proto, time.time())
             state['active_key_id'] = _hash_key(key_value)
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
@@ -4610,8 +4653,12 @@ def _audit_key_switch(source, proto, key_value, reason='', *, confirmation='', a
         pass
     source = str(source or 'system').strip()
     auto_source = source in ('youtube_auto_failover', 'telegram_auto_failover', 'auto_failover', 'chatgpt_auto_failover')
+    if auto_source:
+        _route_recovery_gate.committed(proto, time.time())
     service = ('chatgpt_services' if source == 'chatgpt_auto_failover' else
                'youtube' if source == 'youtube_auto_failover' else ('telegram' if auto_source else ''))
+    if source == 'chatgpt_auto_failover' and trigger:
+        service = trigger
     message = f'Автоматически выбран ключ: {display_name}' if auto_source else display_name
     if reason:
         message = f'{message}. Причина: {reason}'
@@ -11968,6 +12015,8 @@ def _discard_superseded_failover_transactions(proto):
 
 
 def _reset_failover_state_after_manual_apply(proto, key_value):
+    _chatgpt_failover_states.pop(proto, None)
+    _route_recovery_gate.committed(proto, time.time())
     key_id = _hash_key(key_value) if key_value else ''
     if proto == _telegram_route_protocol():
         auto_failover_state['last_ok'] = 0.0
@@ -12392,6 +12441,7 @@ def _find_pool_failover_candidate_in_process(
     service_contracts=None,
     confirmation_proxy=None,
     confirmation_verdict=False,
+    confirmation_details=False,
     record_confirmation=True,
 ):
     candidates = [
@@ -12466,7 +12516,10 @@ def _find_pool_failover_candidate_in_process(
             return None
         if confirmation_verdict:
             verdict = worker_payload.get('confirmation_verdict')
-            return verdict if type(verdict) is bool else None
+            verdict = verdict if type(verdict) is bool else None
+            if confirmation_details:
+                return {'verdict': verdict, 'service': worker_payload.get('confirmation_service', '')}
+            return verdict
         candidate = worker_payload.get('candidate')
         if not worker_payload.get('ok') or not isinstance(candidate, list) or len(candidate) < 4:
             return None
@@ -16967,7 +17020,9 @@ def _live_key_data_check(proto, key):
 
 
 def _live_key_precheck(proto, key):
-    services = _live_key_required_services(proto) or ['telegram']
+    contract = _current_failover_service_contracts().get(proto, {})
+    services = (['route'] if any(c['id'] == 'chatgpt_services' for c in contract.get('custom', []))
+                else _live_key_required_services(proto) or ['telegram'])
     for service in services:
         candidate = _find_pool_failover_candidate(
             [(proto, key)], service=service, measure_youtube_quality=False,

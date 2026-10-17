@@ -62,7 +62,7 @@ jobs:
         run: python -m pytest tests/test_youtube_stream_evidence.py tests/test_auto_failover_contract.py -q
 
       - name: Route service failover admission
-        run: python -m pytest tests/test_failover_services.py tests/test_dots_failover.py -q
+        run: python -m pytest tests/test_failover_services.py tests/test_dots_failover.py tests/test_route_recovery.py -q
 
       - name: Scheduled admission and bounded runtime logs
         run: python -m pytest tests/test_scheduled_admission.py tests/test_runtime_logging.py -q

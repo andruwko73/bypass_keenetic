@@ -338,6 +338,9 @@ def failover_candidates(
         failure_backoff = 0
 
     def probe_score(key_value):
+        if service == 'route':
+            # Telegram cache must neither filter nor rank an unrelated route.
+            return (2, 0, False)
         probe = {}
         if not key_probe_cache or not hash_key:
             pass

@@ -163,7 +163,11 @@ def test_permanent_service_guard_restores_without_falsifying_telegram(proto,outc
 
 
 def bot_function(name, env):
+    env.setdefault('_route_recovery_gate', policy.RouteRecoveryGate())
     tree=ast.parse((ROOT/'app/bot.py').read_text(encoding='utf-8'))
+    if '_automatic_route_recovery_deferred' not in env:
+        helper=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_automatic_route_recovery_deferred')
+        exec(compile(ast.Module(body=[helper],type_ignores=[]),'bot-fixture','exec'),env)
     node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==name)
     exec(compile(ast.Module(body=[node],type_ignores=[]),'bot-fixture','exec'),env)
     return env[name]

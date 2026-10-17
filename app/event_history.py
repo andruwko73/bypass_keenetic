@@ -17,6 +17,11 @@ _recent_event_lock = threading.Lock()
 _recent_event_fingerprints = {}
 MAX_RECENT_EVENT_FINGERPRINTS = 128
 NEVER_DEDUPLICATE_ACTIONS = frozenset({'key_switch', 'key_switch_auto'})
+TECHNICAL_RECOVERY_ACTIONS = frozenset({
+    'failover_service_check', 'auto_failover', 'auto_failover_confirm_fail',
+    'auto_failover_skip', 'auto_failover_switch', 'auto_failover_guard_bypass',
+    'stream_guard_defer',
+})
 DISPLAY_COMPACT_ACTIONS = frozenset({
     'stream_guard_defer',
     'udp_quic_drift_fast_add',
@@ -159,13 +164,21 @@ def _trim_history(path, max_events, *, force=False):
     except Exception:
         return
     max_events = max(1, int(max_events or MAX_EVENTS))
-    if len(lines) <= max_events:
+    retained = []
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(item, dict) and item.get('action') not in TECHNICAL_RECOVERY_ACTIONS:
+            retained.append(line)
+    if len(retained) == len(lines) and len(lines) <= max_events:
         return
     _trim_write_counts[path] = 0
     tmp_path = path + '.tmp'
     try:
         with open(tmp_path, 'w', encoding='utf-8') as file:
-            file.writelines(lines[-max_events:])
+            file.writelines(retained[-max_events:])
         os.replace(tmp_path, path)
     except Exception:
         try:
@@ -192,6 +205,8 @@ def record_event(
 ):
     path = _event_path(event_path)
     action_text = _limit_text(action, 80)
+    if action_text in TECHNICAL_RECOVERY_ACTIONS:
+        return True
     redact_ip = _action_redacts_ip(action_text)
     event = {
         'ts': int(time_provider()),
@@ -273,7 +288,14 @@ def load_events(limit=50, *, event_path=None):
         with open(path, 'r', encoding='utf-8', errors='ignore') as file:
             # The on-disk history is capped at MAX_EVENTS, so one bounded read can
             # compact every technical repeat before applying the display limit.
-            lines = deque((line.strip() for line in file if line.strip()), maxlen=MAX_EVENTS)
+            lines = deque(maxlen=MAX_EVENTS)
+            for line in file:
+                try:
+                    item = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(item, dict) and item.get('action') not in TECHNICAL_RECOVERY_ACTIONS:
+                    lines.append(line.strip())
     except Exception:
         return []
     events = []

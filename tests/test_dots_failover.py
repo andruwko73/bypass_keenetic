@@ -35,10 +35,10 @@ def test_unknown_country_is_not_a_failed_key(body):
 
 
 @pytest.mark.parametrize('proto', PROTOCOL_DISPLAY_ORDER)
-def test_gpt_requires_telegram_only_on_its_assigned_route(proto):
+def test_gpt_does_not_require_unassigned_telegram(proto):
     check = {'id': 'chatgpt_services', 'url': 'https://chatgpt.com'}
     contracts = policy.build_contracts([check], {proto: ['chatgpt.com']})
-    assert contracts[proto]['telegram'] is True
+    assert contracts[proto]['telegram'] is False
     assert contracts[proto]['custom']
     for other in PROTOCOL_DISPLAY_ORDER:
         if other != proto:
@@ -81,7 +81,7 @@ def test_every_probe_transport_checks_country_before_accepting_api_401(monkeypat
 
 
 @pytest.mark.parametrize('verdict', [True, None, False])
-def test_recovery_needs_two_failures_and_preserves_unknown(verdict):
+def test_recovery_needs_three_failures_and_preserves_unknown(verdict):
     state = {}; applied = []
     def cycle(t):
         return policy.required_route_recovery(state, ('key', 'route'), now=t,
@@ -89,9 +89,10 @@ def test_recovery_needs_two_failures_and_preserves_unknown(verdict):
             still_valid=lambda c: True, apply_candidate=applied.append)
     assert not cycle(100)
     assert not cycle(110)
-    assert cycle(160) is (verdict is False)
+    assert not cycle(160)
+    assert cycle(220) is (verdict is False)
     assert applied == (['candidate'] if verdict is False else [])
-    assert not cycle(170)
+    assert not cycle(230)
 
 
 def test_changed_key_or_route_resets_failures_and_stale_candidate_never_applies():
@@ -122,7 +123,8 @@ def test_unknown_active_worker_result_survives_serialization_without_starting_xr
 
 @pytest.mark.parametrize('proto', PROTOCOL_DISPLAY_ORDER)
 @pytest.mark.parametrize('media_active', [False, True])
-def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto, media_active):
+@pytest.mark.parametrize('bookkeeping_error', [False, True])
+def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto, media_active, bookkeeping_error):
     contract = policy.build_contracts([{'id': 'chatgpt_services', 'url': 'https://chatgpt.com'}],
                                       {proto: ['chatgpt.com']})[proto]
     applied = []; clock = [100]; current = {proto: 'old'}
@@ -132,7 +134,7 @@ def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto, m
         '_key_apply_maintenance_active': lambda: False, '_post_apply_ready': lambda: True,
         'pool_apply_lock': threading.RLock(), '_current_failover_service_contracts': lambda: {proto: contract},
         '_load_current_keys': lambda: current, '_hash_key': lambda k: k,
-        'proxy_settings': {proto: 'proxy'}, '_check_required_route': lambda *a: False,
+        'proxy_settings': {proto: 'proxy'}, '_check_required_route': lambda *a, **kw: {'verdict': False, 'service': 'chatgpt_services'},
         '_post_apply_current_matches': lambda p, k: current[p] == k,
         '_failover_candidate_still_valid': lambda *a: True,
         '_key_pool_store': lambda: SimpleNamespace(failover_candidates=lambda *a, **kw: [(proto, 'new')]),
@@ -141,8 +143,11 @@ def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto, m
         '_find_pool_failover_candidate': lambda c, **kw: (proto, 'new', True, None),
         'YOUTUBE_STREAM_GUARD_PROTOCOLS': (proto,), 'YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS':60,
         '_vless_traffic_guard_active':lambda *a,**kw:pytest.fail('unrelated traffic must not block recovery'),
-        '_audit_key_switch': lambda *a: None,
-        '_invalidate_web_status_cache': lambda: None, '_invalidate_key_status_cache': lambda: None}
+        '_audit_key_switch': lambda *a, **kw: None,
+        '_invalidate_web_status_cache': lambda: None, '_invalidate_key_status_cache': lambda: None,
+        '_write_runtime_log': lambda *a: None}
+    if bookkeeping_error:
+        env['_invalidate_web_status_cache'] = lambda: (_ for _ in ()).throw(OSError('fixture'))
     def install(p, key, **kw):
         assert kw == {'automatic': True, 'require_health': True}
         assert env['_chatgpt_failover_guard'].expected == (proto, key, contract['revision'])
@@ -156,9 +161,14 @@ def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto, m
     attempt = bot_function('_attempt_chatgpt_route_failover', env)
     assert attempt() is False
     clock[0] = 160
+    assert attempt() is False
+    clock[0] = 220
     assert attempt() is (not media_active)
     assert applied == ([] if media_active else [(proto, 'new')])
     assert getattr(env['_chatgpt_failover_guard'],'expected',None) is None
+    clock[0] = 280
+    assert attempt() is False
+    assert applied == ([] if media_active else [(proto, 'new')])
 
 
 @pytest.mark.parametrize('mode', ['unknown', 'route_deleted', 'route_changed', 'key_deleted'])

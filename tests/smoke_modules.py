@@ -18684,8 +18684,7 @@ def test_event_history_helpers():
             event_path=str(path),
         )
         events = event_history.load_events(limit=10, event_path=str(path))
-    assert [event['action'] for event in events] == ['key_switch_auto', 'stream_guard_defer']
-    assert events[1]['repeat_count'] == 90
+    assert [event['action'] for event in events] == ['key_switch_auto']
     rendered = web_form_blocks.render_event_history_html([
         {
             'ts': 0,
@@ -18762,7 +18761,7 @@ def test_stream_guard_event_history_redacts_ip_samples_and_compacts_details():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / 'events.jsonl'
         assert event_history.record_event(
-            action='stream_guard_defer',
+            action='stream_guard_error',
             message='active flow 192.168.1.23 -> 142.250.74.110',
             details={
                 'reason': 'active_stream',
@@ -18779,7 +18778,7 @@ def test_stream_guard_event_history_redacts_ip_samples_and_compacts_details():
             file.write(json.dumps({
                 'ts': 2,
                 'level': 'info',
-                'action': 'stream_guard_defer',
+                'action': 'stream_guard_error',
                 'source': 'watchdog',
                 'protocol': 'vless',
                 'service': 'youtube',

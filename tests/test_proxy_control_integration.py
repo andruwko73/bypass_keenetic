@@ -14,7 +14,12 @@ from proxy_apply_coordinator import ApplyCoordinator, StaleApply, install_proxy_
 
 
 def bot_function(name, env):
+    from failover_services import RouteRecoveryGate
+    env.setdefault('_route_recovery_gate', RouteRecoveryGate())
     tree = ast.parse((APP / 'bot.py').read_text(encoding='utf-8'))
+    if '_automatic_route_recovery_deferred' not in env:
+        helper = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_automatic_route_recovery_deferred')
+        exec(compile(ast.Module(body=[helper], type_ignores=[]), str(APP / 'bot.py'), 'exec'), env)
     node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(APP / 'bot.py'), 'exec'), env)
     return env[name]

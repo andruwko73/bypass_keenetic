@@ -302,6 +302,9 @@ def find_pool_failover_candidate(
                         )
                     tg_ok = None
                     yt_ok = primary_ok
+                elif service == 'route':
+                    # Admission consists solely of this route's contract.
+                    primary_ok, tg_ok, yt_ok, yt_metrics = True, None, None, {}
                 else:
                     primary_ok, _ = check_telegram_service_through_proxy(
                         check_telegram_api,
@@ -317,14 +320,13 @@ def find_pool_failover_candidate(
                 record_kwargs = dict(yt_metrics)
                 if primary_ok is False:
                     record_kwargs['allow_recent_success_downgrade'] = True
-                record_key_probe(
-                    proto,
-                    key_value,
-                    tg_ok=tg_ok,
-                    yt_ok=yt_ok,
-                    verification_kind='screening',
-                    **record_kwargs,
-                )
+                if service != 'route':
+                    record_key_probe(
+                        proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok,
+                        verification_kind='screening', **record_kwargs,
+                    )
+                elif service_contracts is None:
+                    raise ValueError('Missing route service contract')
                 if primary_ok:
                     if service_contracts is not None:
                         from failover_services import check_required, record_required, service_label
