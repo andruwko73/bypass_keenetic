@@ -1934,9 +1934,10 @@ def _attempt_chatgpt_route_failover():
                         and _failover_candidate_still_valid(proto, candidate[1], 'telegram'))
 
             def select():
-                if proto in YOUTUBE_STREAM_GUARD_PROTOCOLS and _vless_traffic_guard_active(
-                        'ChatGPT / Codex auto-failover',
-                        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS):
+                if proto in YOUTUBE_STREAM_GUARD_PROTOCOLS and _youtube_stream_guard_active(
+                        proto, reason='ChatGPT / Codex auto-failover', log=True,
+                        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+                        require_downlink=True):
                     return None
                 candidates = _key_pool_store().failover_candidates(
                     _load_key_pools(), proto, key, protocols=(proto,),

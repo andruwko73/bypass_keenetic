@@ -121,7 +121,8 @@ def test_unknown_active_worker_result_survives_serialization_without_starting_xr
 
 
 @pytest.mark.parametrize('proto', PROTOCOL_DISPLAY_ORDER)
-def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto):
+@pytest.mark.parametrize('media_active', [False, True])
+def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto, media_active):
     contract = policy.build_contracts([{'id': 'chatgpt_services', 'url': 'https://chatgpt.com'}],
                                       {proto: ['chatgpt.com']})[proto]
     applied = []; clock = [100]; current = {proto: 'old'}
@@ -138,7 +139,9 @@ def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto):
         '_load_key_pools': lambda: {proto: ['old', 'new']}, '_load_key_probe_cache': lambda: {},
         '_automatic_hot_candidates': lambda c: c,
         '_find_pool_failover_candidate': lambda c, **kw: (proto, 'new', True, None),
-        'YOUTUBE_STREAM_GUARD_PROTOCOLS': (), '_audit_key_switch': lambda *a: None,
+        'YOUTUBE_STREAM_GUARD_PROTOCOLS': (proto,), 'YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS':60,
+        '_vless_traffic_guard_active':lambda *a,**kw:pytest.fail('unrelated traffic must not block recovery'),
+        '_audit_key_switch': lambda *a: None,
         '_invalidate_web_status_cache': lambda: None, '_invalidate_key_status_cache': lambda: None}
     def install(p, key, **kw):
         assert kw == {'automatic': True, 'require_health': True}
@@ -146,12 +149,16 @@ def test_independent_bot_recovers_gpt_route_with_telegram_still_working(proto):
         applied.append((p, key))
         current[p] = key
     env['_install_key_for_protocol'] = install
+    def media_guard(p, **kw):
+        assert p == proto and kw['require_downlink'] is True and kw['log'] is True
+        return media_active
+    env['_youtube_stream_guard_active'] = media_guard
     attempt = bot_function('_attempt_chatgpt_route_failover', env)
     assert attempt() is False
     clock[0] = 160
-    assert attempt() is True
-    assert applied == [(proto, 'new')]
-    assert env['_chatgpt_failover_guard'].expected is None
+    assert attempt() is (not media_active)
+    assert applied == ([] if media_active else [(proto, 'new')])
+    assert getattr(env['_chatgpt_failover_guard'],'expected',None) is None
 
 
 @pytest.mark.parametrize('mode', ['unknown', 'route_deleted', 'route_changed', 'key_deleted'])
