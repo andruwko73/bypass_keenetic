@@ -4,7 +4,7 @@ import os
 import threading
 
 
-ASSET_CACHE_REVISION = 'static-assets-1'
+ASSET_CACHE_REVISION = 'service-order-2'
 _asset_cache_lock = threading.Lock()
 _static_asset_cache = {}
 

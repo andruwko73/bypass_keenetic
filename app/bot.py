@@ -4573,12 +4573,14 @@ def _clear_pool_page(chat_id):
         chat_pool_pages.pop(chat_id, None)
 
 
-def _telegram_info_text_from_readme():
-    return _telegram_info_runtime().telegram_info_text_from_readme(
-        _fetch_remote_text,
-        _raw_github_url,
-        _read_text_file,
-        README_PATH,
+def _telegram_information_text():
+    return _telegram_info_runtime().telegram_information_html(
+        version=APP_VERSION_LABEL,
+        router_ip=routerip,
+        port=browser_port,
+        repo_owner=fork_repo_owner,
+        repo_name=fork_repo_name,
+        pool_enabled=app_runtime_mode.app_mode_pool_enabled(_load_app_runtime_mode()),
     )
 
 
@@ -8517,8 +8519,8 @@ def _handle_install_menu_message(message, set_menu_state):
     return False
 
 
-def _send_telegram_readme_info(message, reply_markup):
-    bot.send_message(message.chat.id, _telegram_info_text_from_readme(), parse_mode='HTML',
+def _send_telegram_information(message, reply_markup):
+    bot.send_message(message.chat.id, _telegram_information_text(), parse_mode='HTML',
                      disable_web_page_preview=True, reply_markup=reply_markup)
 
 
@@ -8552,7 +8554,7 @@ def _handle_common_telegram_menu_message(message, level, bypass, set_menu_state,
 
     # Кнопка "Обновление" убрана из меню "Сервис" (заменена на "Статус ключей").
     if message.text == '📄 Информация':
-        _send_telegram_readme_info(message, main)
+        _send_telegram_information(message, main)
         return True
 
     if message.text == '/keys_free':

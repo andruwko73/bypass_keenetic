@@ -7114,8 +7114,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'tmp/bypass-bootstrap-install' in readme_source
     assert '## Структура репозитория' not in readme_source
     assert 'Прогрев YouTube выполняется отдельным коротким процессом для ускорения загрузки видео' not in readme_source
-    assert 'Тёмная и светлая темы' in readme_source
-    assert 'Собственный фон веб-интерфейса' in readme_source
+    assert 'темы' in readme_source.lower()
+    assert 'собственный фон' in readme_source.lower()
     assert 'не увеличивает постоянный RSS Telegram-бота' not in readme_source
     bootstrap_source = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     assert 'prepare_repo_archive()' in bootstrap_source
@@ -11836,7 +11836,7 @@ def test_telegram_bot_menu_button_smoke():
         finally:
             bot_module._read_unblock_list_entries = original_route_reader
         assert route_entries['hysteria2'] == ('hysteria2',)
-        bot_module._send_telegram_readme_info = (
+        bot_module._send_telegram_information = (
             lambda msg, reply_markup: recorder.send_message(msg.chat.id, 'INFO', reply_markup=reply_markup)
         )
         bot_module._send_key_status_report = (

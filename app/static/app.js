@@ -1644,11 +1644,26 @@
             return result;
         }
 
+        function orderedProtocolStatusIcons(iconsHtml) {
+            const icons = protocolStatusIconMap(iconsHtml);
+            if (!icons.size) {
+                return String(iconsHtml || '');
+            }
+            const order = new Map(['telegram', 'youtube'].concat(
+                customChecks.map(function(check) { return 'custom:' + check.id; })
+            ).map(function(id, index) { return [id, index]; }));
+            return Array.from(icons.entries()).sort(function(a, b) {
+                const aRank = order.has(a[0]) ? order.get(a[0]) : order.size;
+                const bRank = order.has(b[0]) ? order.get(b[0]) : order.size;
+                return aRank - bRank || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+            }).map(function(entry) { return entry[1].outerHTML; }).join('');
+        }
+
         function mergeProtocolStatusIcons(primaryHtml, fallbackHtml) {
             const primary = protocolStatusIconMap(primaryHtml);
             const fallback = protocolStatusIconMap(fallbackHtml);
             if (!primary.size) {
-                return String(primaryHtml || fallbackHtml || '');
+                return orderedProtocolStatusIcons(primaryHtml || fallbackHtml || '');
             }
             fallback.forEach(function(item, serviceId) {
                 const current = primary.get(serviceId);
@@ -1665,12 +1680,12 @@
                     primary.set(serviceId, item);
                 }
             });
-            return Array.from(primary.values()).map(function(item) { return item.outerHTML; }).join('');
+            return orderedProtocolStatusIcons(Array.from(primary.values()).map(function(item) { return item.outerHTML; }).join(''));
         }
 
         function stableProtocolStatusIcons(card, iconsHtml, isLiveStatus, poolOverride) {
             if (!card) {
-                return iconsHtml || '';
+                return orderedProtocolStatusIcons(iconsHtml);
             }
             const current = String(iconsHtml || '');
             if (isLiveStatus && !poolOverride) {
@@ -1680,7 +1695,7 @@
             }
             const liveIcons = String(card.dataset.protocolLiveIcons || '');
             const poolIcons = String(card.dataset.protocolPoolIcons || '');
-            return liveIcons ? mergeProtocolStatusIcons(liveIcons, poolIcons) : current;
+            return liveIcons ? mergeProtocolStatusIcons(liveIcons, poolIcons) : orderedProtocolStatusIcons(current);
         }
 
         function serviceStateText(state, okText, failText) {
@@ -4207,6 +4222,8 @@
                     pollStatus: pollStatus,
                     refreshPoolData: refreshPoolData,
                     mergeProtocolStatusIcons: mergeProtocolStatusIcons,
+                    orderedProtocolStatusIcons: orderedProtocolStatusIcons,
+                    stableProtocolStatusIcons: stableProtocolStatusIcons,
                     protocolStatusFromActivePoolRow: protocolStatusFromActivePoolRow,
                     updatedPageIsReady: updatedPageIsReady,
                     waitForUpdatedWebServerBeforeReload: waitForUpdatedWebServerBeforeReload

@@ -564,6 +564,30 @@ async function assertProtocolStatusServiceMerge(page, label) {
         hasImage: Boolean(node.querySelector('img')),
       }));
     };
+    const ordered = hooks.orderedProtocolStatusIcons;
+    const stable = hooks.stableProtocolStatusIcons;
+    const checks = (window.BK_APP_CONFIG.customChecks || []).map((check) => 'custom:' + check.id);
+    const scrambled = checks.slice().reverse().map((id) => item(id, 'ok', id)).join('') +
+      item('youtube', 'warn', 'yt') + item('telegram', 'ok', 'tg');
+    const canonical = ['telegram', 'youtube'].concat(checks);
+    const ids = (html) => parse(html).map((node) => node.service).join('|');
+    if (typeof ordered !== 'function' || typeof stable !== 'function') {
+      return { error: 'service order test hooks unavailable' };
+    }
+    const orderCases = [ordered(scrambled), merge('', scrambled), merge(scrambled, ''),
+      merge(checks.map((id) => item(id, 'ok', id)).join(''), item('youtube', 'ok', 'yt') + item('telegram', 'ok', 'tg')),
+      stable(null, scrambled, false, false), stable(document.createElement('div'), scrambled, false, true)];
+    const card = document.createElement('div');
+    stable(card, checks.map((id) => item(id, 'ok', id)).join(''), true, false);
+    orderCases.push(stable(card, item('youtube', 'ok', 'yt') + item('telegram', 'ok', 'tg'), false, true));
+    const orderChecks = orderCases.every((html) => ids(html) === canonical.join('|')) &&
+      ids(ordered(item('custom:zz', 'unknown', 'z') + item('custom:aa', 'pending', 'a'))) === 'custom:aa|custom:zz' &&
+      ids(ordered(item('youtube', 'unused', '') + item('youtube', 'ok', 'duplicate'))) === 'youtube' &&
+      ordered('') === '';
+    const statesPreserved = ['ok', 'warn', 'fail', 'unknown', 'pending', 'unused'].every((state) => {
+      const result = parse(ordered(item('youtube', state, 'value')));
+      return result.length === 1 && result[0].state === state && result[0].text === 'value';
+    });
     const fixture = document.createElement('div');
     fixture.innerHTML = '<article data-protocol-card="scope-test"></article>' +
       '<section data-protocol-panel="scope-test" data-core-services-loaded="1" data-core-services="youtube"></section>' +
@@ -591,6 +615,8 @@ async function assertProtocolStatusServiceMerge(page, label) {
       poolYoutube: parse(poolYoutube),
       poolScoped: compactStatus(poolScoped),
       liveScoped: compactStatus(liveScoped),
+      orderChecks,
+      statesPreserved,
     };
   });
   if (result.error) {
@@ -598,7 +624,7 @@ async function assertProtocolStatusServiceMerge(page, label) {
   }
   const services = result.merged.map((item) => item.service);
   if (
-    services.join('|') !== 'telegram|youtube|custom:chat' ||
+    services.join('|') !== 'telegram|youtube|custom:chat' || !result.orderChecks || !result.statesPreserved ||
     result.merged[0].state !== 'ok' || result.merged[0].text !== 'live-tg' ||
     result.liveFail[0].state !== 'ok' || result.liveFail[0].text !== 'pool-ok' ||
     result.fallback[0].state !== 'ok' ||
